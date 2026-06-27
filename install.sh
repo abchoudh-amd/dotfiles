@@ -88,3 +88,4 @@ seed_blob "$HOME/.claude/.credentials.json"     "$DOTFILES/secrets/claude-creden
 echo "==> Done."
 [ -d "$BACKUP" ] && echo "    Backups saved under $BACKUP"
 echo "    Open a new shell, or: source ~/.bashrc"
+echo "    To install the CLI tools these configs depend on: ./install-tools.sh"

@@ -27,6 +27,19 @@ symlinks and leaves correct ones untouched.
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/zellij`, `config/btop`          |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
 
+## Tools
+
+The configs assume a set of CLI tools (`eza`, `rg`, `zoxide`, `starship`,
+`nvim`, …) and tmux plugins. They're inventoried in [`TOOLS.md`](TOOLS.md) and
+installed by:
+
+```bash
+./install-tools.sh   # idempotent; skips anything already on PATH
+```
+
+`install.sh` handles configs (symlinks); `install-tools.sh` handles binaries —
+they're separate so you can run either independently.
+
 ## Secrets
 
 The git repo contains **no secrets**. Real values live in two untracked,
