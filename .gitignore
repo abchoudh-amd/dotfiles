@@ -1,0 +1,13 @@
+# Secrets — never commit
+secrets.env
+secrets/
+
+# Local overrides
+*.local
+**/.claude/settings.local.json
+
+# State / logs / backups
+*.log
+*.bak
+*.swp
+.DS_Store

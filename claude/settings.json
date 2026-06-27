@@ -1,0 +1,77 @@
+{
+  "env": {
+    "CLAUDE_CODE_EFFORT_LEVEL": "max",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "teammateMode": "tmux"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/slurm-bootstrap.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/rocprofiler-compute-precommit.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/grill-me-gate.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/grill-me-reset.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/rocprofiler-compute-venv.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/claude-statusline"
+  },
+  "alwaysThinkingEnabled": true,
+  "voice": {
+    "enabled": true,
+    "mode": "tap"
+  },
+  "showThinkingSummaries": false,
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "custom:snazzy-light",
+  "editorMode": "normal",
+  "autoCompactEnabled": true,
+  "speed": "fast"
+}

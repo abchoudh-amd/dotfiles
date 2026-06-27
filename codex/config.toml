@@ -1,0 +1,39 @@
+# Top-level settings (Must come before any [sections])
+model_provider = "custom-gateway"
+model = "gpt-5.5"
+approval_policy = "never"   # Prevents prompts for command execution
+sandbox_mode = "danger-full-access"
+model_reasoning_effort = "xhigh"
+service_tier = "fast"
+
+[model_providers.custom-gateway]
+name = "AMD LLM Gateway"
+base_url = "https://llm-api.amd.com/OpenAI"
+wire_api = "responses"
+
+# Maps the header name to an environment variable name
+env_http_headers = { "Ocp-Apim-Subscription-Key" = "LLM_GATEWAY_KEY" }
+
+[features]
+multi_agent = true
+apps = true
+prevent_idle_sleep = true
+
+[projects."/home/AMD/abchoudh"]
+trust_level = "trusted"
+
+[projects."/home/AMD/abchoudh/compute-ai-skills"]
+trust_level = "trusted"
+
+[projects."/home/AMD/abchoudh/quasar"]
+trust_level = "trusted"
+
+[projects."/home/AMD/abchoudh/rocm/rocm-systems"]
+trust_level = "trusted"
+
+[tui]
+status_line = ["model-with-reasoning", "current-dir"]
+status_line_use_colors = true
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
