@@ -43,6 +43,8 @@ link "$DOTFILES/claude/statusline.sh"           "$HOME/.claude/statusline.sh"
 link "$DOTFILES/claude/claude-statusline"       "$HOME/.claude/claude-statusline"
 link "$DOTFILES/claude/themes/snazzy-light.json" "$HOME/.claude/themes/snazzy-light.json"
 link "$DOTFILES/codex/config.toml"              "$HOME/.codex/config.toml"
+link "$DOTFILES/tmux/.tmux.conf"                "$HOME/.tmux.conf"
+link "$DOTFILES/tmux/.gitmux.conf"              "$HOME/.gitmux.conf"
 
 echo "==> Secret store (untracked)"
 mkdir -p "$DOTFILES/secrets"

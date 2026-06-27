@@ -25,6 +25,7 @@ symlinks and leaves correct ones untouched.
 | Claude Code     | `claude/settings.json`, `statusline.sh`, `claude-statusline`, theme   |
 | Codex           | `codex/config.toml` (key read from `$LLM_GATEWAY_KEY` at runtime)     |
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/zellij`, `config/btop`          |
+| tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
 
 ## Secrets
 
@@ -47,5 +48,7 @@ into `secrets/`.
 
 - **Claude skills/hooks** (`~/.claude/skills`, `~/.claude/hooks`) are symlinks
   into the separate `~/compute-ai-skills` repo — clone that separately.
+- **tmux plugins** (`~/.tmux/plugins/`) are installed by TPM, not vendored. After
+  install, open tmux and press `prefix + I` (prefix is `Ctrl-s`) to fetch them.
 - Claude/Codex state (history, sessions, sqlite, caches) and gh config beyond
   the auth token are intentionally excluded.

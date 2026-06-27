@@ -6,6 +6,9 @@ secrets/
 *.local
 **/.claude/settings.local.json
 
+# tmux plugins are installed by TPM (prefix + I), not vendored
+**/.tmux/plugins/
+
 # State / logs / backups
 *.log
 *.bak
