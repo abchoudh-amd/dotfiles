@@ -48,6 +48,11 @@ if need uv; then
     if have sqlit; then info "ok   sqlit"; else info "uv tool install sqlit-tui"; uv tool install sqlit-tui; fi
 fi
 
+echo "==> claude code (native installer)"
+if have claude; then info "ok   claude"; else
+    info "install claude"; curl -fsSL https://claude.ai/install.sh | bash
+fi
+
 echo "==> fzf"
 if have fzf; then
     info "ok   fzf"

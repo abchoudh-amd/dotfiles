@@ -42,6 +42,12 @@ These managers are used to install the tools and are not installed by the script
 |------|---------|--------|
 | sqlit-tui (`sqlit`) | SQLite TUI | https://pypi.org/project/sqlit-tui |
 
+## AI CLIs (native installer)
+
+| Tool | Purpose | Source |
+|------|---------|--------|
+| claude | Claude Code CLI (native installer → `~/.local/bin/claude`) | https://claude.ai/install.sh |
+
 ## fzf (git clone + bundled installer)
 
 | Tool | Purpose | Source |
