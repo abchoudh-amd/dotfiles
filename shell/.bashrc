@@ -152,7 +152,7 @@ alias ls='eza --icons=always --all --group-directories-first --oneline'
 alias cd='z'
 alias top='btop'
 alias grep='rg'
-alias find='fdfind'
+alias find='fd'
 alias tree='eza --icons=always --all --group-directories-first --tree'
 
 alias vim="nvim"
