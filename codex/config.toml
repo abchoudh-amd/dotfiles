@@ -19,21 +19,16 @@ multi_agent = true
 apps = true
 prevent_idle_sleep = true
 
-[projects."/home/AMD/abchoudh"]
-trust_level = "trusted"
-
-[projects."/home/AMD/abchoudh/compute-ai-skills"]
-trust_level = "trusted"
-
-[projects."/home/AMD/abchoudh/quasar"]
-trust_level = "trusted"
-
-[projects."/home/AMD/abchoudh/rocm/rocm-systems"]
-trust_level = "trusted"
-
 [tui]
 status_line = ["model-with-reasoning", "current-dir"]
 status_line_use_colors = true
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4
+"gpt-5.6-sol" = 6
+
+[mcp_servers.jira]
+url = "https://mcp.atlassian.com/v1/mcp/authv2"
+
+[mcp_servers.confluence]
+url = "https://mcp.atlassian.com/v1/mcp/authv2"
