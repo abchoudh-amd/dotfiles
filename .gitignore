@@ -10,6 +10,7 @@ secrets/
 **/.tmux/plugins/
 
 # State / logs / backups
+/.claude.json
 *.log
 *.bak
 *.swp

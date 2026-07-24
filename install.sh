@@ -74,8 +74,10 @@ cleanup() {
 trap cleanup EXIT
 
 ensure_backup_dir() {
-    [[ -n "$BACKUP_DIR" ]] && return 0
-    BACKUP_DIR="$(mktemp -d "$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S).XXXXXX")" || return 1
+    if [[ -z "$BACKUP_DIR" ]]; then
+        BACKUP_DIR="$(mktemp -d "$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S).XXXXXX")" || return 1
+    fi
+    chmod 0700 "$BACKUP_DIR"
 }
 
 backup_existing() {
@@ -247,6 +249,10 @@ preflight() {
     [[ $# -eq 0 ]] || { info "usage: ./install.sh" >&2; return 2; }
     (( EUID != 0 )) || { info "run this installer as a normal user, not root or sudo" >&2; return 2; }
     [[ -n "${HOME:-}" && "$HOME" != / ]] || { info "HOME is not a safe user directory" >&2; return 2; }
+    [[ -z "${CLAUDE_CONFIG_DIR:-}" ]] || {
+        info "CLAUDE_CONFIG_DIR must be unset so the installer can protect $HOME/.claude.json" >&2
+        return 2
+    }
     architecture="$(uname -m)"
     [[ "$architecture" == x86_64 ]] || { info "unsupported architecture: $architecture (x86_64 required)" >&2; return 2; }
     [[ -r /etc/os-release ]] || { info "missing /etc/os-release" >&2; return 2; }
@@ -277,7 +283,7 @@ preflight() {
 
 install_system_packages_debian() {
     local -a packages=(
-        ca-certificates git curl jq fish python3 python3-venv tar unzip zip xz-utils bzip2
+        ca-certificates git curl jq fish python3 python3-venv tar unzip zip xz-utils bzip2 findutils
         bash-completion build-essential cmake ninja-build pkg-config libssl-dev libevent-dev
         libncurses-dev gettext bison
     )
@@ -288,7 +294,7 @@ install_system_packages_debian() {
 install_system_packages_rhel() {
     local epel_url="https://dl.fedoraproject.org/pub/epel/epel-release-latest-${RHEL_MAJOR}.noarch.rpm"
     local -a packages=(
-        ca-certificates git curl jq fish python3 tar unzip zip xz bzip2 bash-completion
+        ca-certificates git curl jq fish python3 tar unzip zip xz bzip2 findutils bash-completion
         gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config openssl-devel libevent-devel
         ncurses-devel gettext bison
     )
@@ -454,6 +460,647 @@ install_claude() {
     download https://claude.ai/install.sh "$script" || return 1
     bash "$script" latest || return 1
     have claude
+}
+
+json_document_has_unique_object_keys() {
+    local document="$1"
+    [[ -f "$document" && -r "$document" ]] || return 1
+    python3 - "$document" >/dev/null 2>&1 <<'PY'
+import json
+import sys
+
+
+class DuplicateObjectKey(Exception):
+    pass
+
+
+def reject_duplicate_object_keys(pairs):
+    parsed_object = {}
+    for key, value in pairs:
+        if key in parsed_object:
+            raise DuplicateObjectKey
+        parsed_object[key] = value
+    return parsed_object
+
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as document:
+        json.load(document, object_pairs_hook=reject_duplicate_object_keys)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+claude_mcp_declaration_is_valid() {
+    local declaration="$1"
+    json_document_has_unique_object_keys "$declaration" || return 1
+    jq -se '
+        length == 1 and
+        (.[0] |
+            type == "object" and
+            keys == ["mcpServers"] and
+            (.mcpServers | type == "object") and
+            (.mcpServers | keys) == ["confluence", "jira"] and
+            .mcpServers.jira == {
+                "type": "http",
+                "url": "https://mcp.atlassian.com/v1/mcp/authv2"
+            } and
+            .mcpServers.confluence == {
+                "type": "http",
+                "url": "https://mcp.atlassian.com/v1/mcp/authv2"
+            })
+    ' "$declaration" >/dev/null 2>&1
+}
+
+claude_state_is_valid() {
+    local state="$1"
+    [[ -f "$state" && ! -L "$state" ]] || return 1
+    json_document_has_unique_object_keys "$state" || return 1
+    jq -se '
+        length == 1 and
+        (.[0] |
+            type == "object" and
+            ((has("mcpServers") | not) or (.mcpServers | type == "object")))
+    ' "$state" >/dev/null 2>&1
+}
+
+canonical_declared_claude_record() {
+    local declaration="$1" name="$2"
+    claude_mcp_declaration_is_valid "$declaration" || return 1
+    jq -S -c --arg name "$name" '.mcpServers[$name]' "$declaration" 2>/dev/null
+}
+
+lookup_claude_record() {
+    local state="$1" name="$2" output_name="$3"
+    local lookup_result presence record_value
+    printf -v "$output_name" '%s' "" || return 2
+    claude_state_is_valid "$state" || return 2
+    lookup_result="$(jq -S -c --arg name "$name" '
+        (.mcpServers // {}) as $servers |
+        if ($servers | has($name)) then
+            [true, $servers[$name]]
+        else
+            [false]
+        end
+    ' "$state" 2>/dev/null)" || return 2
+    presence="$(jq -r '.[0] | if . == true then "present" elif . == false then "absent" else "invalid" end' <<< "$lookup_result" 2>/dev/null)" || return 2
+    case "$presence" in
+        present)
+            record_value="$(jq -S -c '.[1]' <<< "$lookup_result" 2>/dev/null)" || return 2
+            printf -v "$output_name" '%s' "$record_value" || return 2
+            return 0
+            ;;
+        absent) return 1 ;;
+        *) return 2 ;;
+    esac
+}
+
+canonical_claude_non_mcp_fields() {
+    claude_state_is_valid "$1" || return 1
+    jq -S -c 'del(.mcpServers)' "$1" 2>/dev/null
+}
+
+canonical_unmanaged_claude_records() {
+    claude_state_is_valid "$1" || return 1
+    jq -S -c '
+        (.mcpServers // {}) |
+        with_entries(select(.key != "jira" and .key != "confluence"))
+    ' "$1" 2>/dev/null
+}
+
+canonical_claude_state() {
+    claude_state_is_valid "$1" || return 1
+    jq -S -c '.' "$1" 2>/dev/null
+}
+
+claude_mcp_state_is_exact() {
+    local state="$1" declaration="$2" name desired_record current_record
+    local -a names=(jira confluence)
+    claude_mcp_declaration_is_valid "$declaration" || return 1
+    claude_state_is_valid "$state" || return 1
+    for name in "${names[@]}"; do
+        desired_record="$(canonical_declared_claude_record "$declaration" "$name")" || return 1
+        lookup_claude_record "$state" "$name" current_record || return 1
+        [[ "$current_record" == "$desired_record" ]] || return 1
+    done
+}
+
+create_claude_state_snapshot() {
+    local state="$1" snapshot="$2"
+    claude_state_is_valid "$state" || return 1
+    [[ ! -e "$snapshot" && ! -L "$snapshot" ]] || return 1
+    mkdir -p "$(dirname "$snapshot")" || return 1
+    (umask 077; cp -- "$state" "$snapshot") || return 1
+    if ! chmod 0600 "$snapshot" || ! claude_state_is_valid "$snapshot"; then
+        rm -f -- "$snapshot"
+        return 1
+    fi
+    info "back $state -> $snapshot"
+}
+
+claude_unrelated_state_matches() {
+    local state="$1" expected_non_mcp="$2" expected_unmanaged="$3"
+    local current_non_mcp current_unmanaged
+    current_non_mcp="$(canonical_claude_non_mcp_fields "$state")" || return 1
+    current_unmanaged="$(canonical_unmanaged_claude_records "$state")" || return 1
+    [[ "$current_non_mcp" == "$expected_non_mcp" &&
+       "$current_unmanaged" == "$expected_unmanaged" ]]
+}
+
+claude_existing_state_matches_transaction() {
+    local state="$1" expected_non_mcp="$2" expected_unmanaged="$3" expected_managed="$4"
+    local canonical_state current_non_mcp current_unmanaged current_managed
+    canonical_state="$(canonical_claude_state "$state")" || return 1
+    current_non_mcp="$(jq -S -c 'del(.mcpServers)' <<< "$canonical_state" 2>/dev/null)" || return 1
+    current_unmanaged="$(jq -S -c '(.mcpServers // {}) | with_entries(select(.key != "jira" and .key != "confluence"))' <<< "$canonical_state" 2>/dev/null)" || return 1
+    current_managed="$(jq -S -c '(.mcpServers // {}) | with_entries(select(.key == "jira" or .key == "confluence"))' <<< "$canonical_state" 2>/dev/null)" || return 1
+    [[ "$current_non_mcp" == "$expected_non_mcp" &&
+       "$current_unmanaged" == "$expected_unmanaged" &&
+       "$current_managed" == "$expected_managed" ]]
+}
+
+report_claude_manual_recovery() {
+    local reason="$1" state="$2" snapshot="${3:-}"
+    local displaced_state="${4:-}" restore_file="${5:-}" recovery_directory="${6:-}"
+    info "manual recovery required: $reason" >&2
+    if [[ -e "$state" || -L "$state" ]]; then
+        info "current Claude state preserved at $state" >&2
+    else
+        info "Claude state destination is absent at $state" >&2
+    fi
+    if [[ -n "$snapshot" ]]; then
+        info "original Claude state snapshot preserved at $snapshot" >&2
+    else
+        info "no original Claude state file existed before this run" >&2
+    fi
+    if [[ -n "$displaced_state" && ( -e "$displaced_state" || -L "$displaced_state" ) ]]; then
+        info "displaced Claude state preserved at $displaced_state" >&2
+    fi
+    if [[ -n "$restore_file" && ( -e "$restore_file" || -L "$restore_file" ) ]]; then
+        info "prepared Claude state preserved at $restore_file" >&2
+    fi
+    if [[ -n "$recovery_directory" && -d "$recovery_directory" ]]; then
+        info "private Claude recovery directory preserved at $recovery_directory" >&2
+    fi
+    info "review the preserved files privately, restore the intended regular JSON file at $state, and then rerun the installer" >&2
+}
+
+restore_displaced_claude_state_without_clobbering() {
+    local state="$1" displaced_state="$2"
+    [[ -e "$displaced_state" || -L "$displaced_state" ]] || return 1
+    mv -T -n -- "$displaced_state" "$state" 2>/dev/null || return 1
+    [[ ! -e "$displaced_state" && ! -L "$displaced_state" ]] || return 1
+    [[ -e "$state" || -L "$state" ]]
+}
+
+recover_displaced_claude_state() {
+    local reason="$1" state="$2" snapshot="$3"
+    local displaced_state="$4" prepared_state="$5" recovery_directory="$6"
+    local cleanup_failed=0
+    if restore_displaced_claude_state_without_clobbering "$state" "$displaced_state"; then
+        if [[ -n "$prepared_state" && ( -e "$prepared_state" || -L "$prepared_state" ) ]]; then
+            rm -f -- "$prepared_state" || cleanup_failed=1
+        fi
+        rmdir -- "$recovery_directory" 2>/dev/null || cleanup_failed=1
+        if (( cleanup_failed )); then
+            report_claude_manual_recovery "$reason; the displaced current state was restored but recovery material remains" "$state" "$snapshot" "$displaced_state" "$prepared_state" "$recovery_directory"
+        else
+            report_claude_manual_recovery "$reason; the displaced current state was restored without overwriting another path" "$state" "$snapshot"
+        fi
+    else
+        report_claude_manual_recovery "$reason; safe restoration of the displaced current state was not possible" "$state" "$snapshot" "$displaced_state" "$prepared_state" "$recovery_directory"
+    fi
+    return 1
+}
+
+atomic_restore_claude_state() {
+    local state="$1" snapshot="$2" original_mode="$3"
+    local expected_non_mcp="$4" expected_unmanaged="$5" expected_managed="$6"
+    local state_directory recovery_directory displaced_state restore_file
+    local displaced_live_state=0
+    state_directory="$(dirname "$state")"
+    recovery_directory="$(mktemp -d "$state_directory/.claude.json.recovery.XXXXXX")" || {
+        report_claude_manual_recovery "a private Claude state recovery location could not be created" "$state" "$snapshot"
+        return 1
+    }
+    if ! chmod 0700 "$recovery_directory"; then
+        report_claude_manual_recovery "the Claude state recovery location could not be made private" "$state" "$snapshot" "" "" "$recovery_directory"
+        return 1
+    fi
+    displaced_state="$recovery_directory/displaced-state"
+    restore_file="$recovery_directory/original-state"
+    if ! (umask 077; cp -- "$snapshot" "$restore_file") ||
+       ! chmod "$original_mode" "$restore_file" ||
+       ! claude_state_is_valid "$restore_file"; then
+        rm -f -- "$restore_file"
+        rmdir -- "$recovery_directory" 2>/dev/null || true
+        report_claude_manual_recovery "the original Claude state could not be prepared for restoration" "$state" "$snapshot" "" "$restore_file" "$recovery_directory"
+        return 1
+    fi
+
+    if [[ -e "$state" || -L "$state" ]]; then
+        if mv -T -- "$state" "$displaced_state"; then
+            displaced_live_state=1
+        elif [[ -e "$state" || -L "$state" ]]; then
+            report_claude_manual_recovery "the live Claude state could not be displaced safely for restoration" "$state" "$snapshot" "" "$restore_file" "$recovery_directory"
+            return 1
+        fi
+    fi
+
+    if (( displaced_live_state )) &&
+       ! claude_existing_state_matches_transaction "$displaced_state" "$expected_non_mcp" "$expected_unmanaged" "$expected_managed"; then
+        recover_displaced_claude_state "the last fully confirmed Claude transaction state could not be proven during MCP reconciliation" "$state" "$snapshot" "$displaced_state" "$restore_file" "$recovery_directory"
+        return 1
+    fi
+
+    if ! ln -T -- "$restore_file" "$state"; then
+        if (( displaced_live_state )); then
+            recover_displaced_claude_state "the original Claude state could not be installed without replacing another state" "$state" "$snapshot" "$displaced_state" "$restore_file" "$recovery_directory"
+        else
+            report_claude_manual_recovery "the original Claude state could not be installed without replacing another state" "$state" "$snapshot" "" "$restore_file" "$recovery_directory"
+        fi
+        return 1
+    fi
+
+    if ! rm -f -- "$restore_file" ||
+       { (( displaced_live_state )) && ! rm -f -- "$displaced_state"; } ||
+       ! rmdir -- "$recovery_directory"; then
+        report_claude_manual_recovery "the original Claude state was restored but recovery material could not be removed" "$state" "$snapshot" "$displaced_state" "$restore_file" "$recovery_directory"
+        return 1
+    fi
+    return 0
+}
+
+restore_existing_claude_transaction() {
+    local state="$1" snapshot="$2" original_mode="$3"
+    local expected_non_mcp="$4" expected_unmanaged="$5" expected_managed="$6"
+    atomic_restore_claude_state "$state" "$snapshot" "$original_mode" "$expected_non_mcp" "$expected_unmanaged" "$expected_managed" || return 1
+    info "restored $state from $snapshot"
+}
+
+run_claude_mcp_remove() {
+    env -u CLAUDE_CONFIG_DIR claude mcp remove --scope user "$1" >/dev/null 2>&1
+}
+
+run_claude_mcp_add() {
+    env -u CLAUDE_CONFIG_DIR claude mcp add-json --scope user "$1" "$2" >/dev/null 2>&1
+}
+
+displaced_generated_claude_state_is_exact() {
+    local state="$1" expected_non_mcp="$2" expected_unmanaged="$3"
+    shift 3
+    local name desired_record current_record record_status index
+    local -a confirmed_additions=("$@")
+    local -a managed_names=(jira confluence)
+    local -A confirmed_records=()
+
+    claude_unrelated_state_matches "$state" "$expected_non_mcp" "$expected_unmanaged" || return 1
+    (( ${#confirmed_additions[@]} % 2 == 0 )) || return 1
+    for (( index=0; index < ${#confirmed_additions[@]}; index+=2 )); do
+        name="${confirmed_additions[index]}"
+        desired_record="${confirmed_additions[index + 1]}"
+        case "$name" in jira|confluence) ;; *) return 1 ;; esac
+        [[ -z "${confirmed_records[$name]+present}" ]] || return 1
+        confirmed_records["$name"]="$desired_record"
+    done
+
+    for name in "${managed_names[@]}"; do
+        lookup_claude_record "$state" "$name" current_record
+        record_status=$?
+        if [[ -n "${confirmed_records[$name]+present}" ]]; then
+            (( record_status == 0 )) || return 1
+            [[ "$current_record" == "${confirmed_records[$name]}" ]] || return 1
+        else
+            (( record_status == 1 )) || return 1
+        fi
+    done
+}
+
+create_generated_claude_baseline_file() {
+    local source_state="$1" baseline_file="$2" mode="$3"
+    local expected_non_mcp="$4" expected_unmanaged="$5"
+    local baseline_record record_status name
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    [[ ! -e "$baseline_file" && ! -L "$baseline_file" ]] || return 1
+    claude_state_is_valid "$source_state" || return 1
+    if ! (umask 077; jq -S '
+        del(.mcpServers.jira, .mcpServers.confluence) |
+        if has("mcpServers") and (.mcpServers | length) == 0 then
+            del(.mcpServers)
+        else
+            .
+        end
+    ' "$source_state" > "$baseline_file" 2>/dev/null) ||
+       ! chmod "$mode" "$baseline_file" ||
+       ! claude_unrelated_state_matches "$baseline_file" "$expected_non_mcp" "$expected_unmanaged"; then
+        rm -f -- "$baseline_file"
+        return 1
+    fi
+    for name in jira confluence; do
+        lookup_claude_record "$baseline_file" "$name" baseline_record
+        record_status=$?
+        (( record_status == 1 )) && [[ -z "$baseline_record" ]] || {
+            rm -f -- "$baseline_file"
+            return 1
+        }
+    done
+}
+
+rollback_new_claude_state() {
+    local state="$1" baseline_captured="$2" expected_non_mcp="$3" expected_unmanaged="$4"
+    shift 4
+    local -a confirmed_additions=("$@")
+    local state_directory recovery_directory displaced_state baseline_file generated_mode
+
+    if [[ ! -e "$state" && ! -L "$state" ]]; then
+        return 0
+    fi
+    if (( ! baseline_captured )); then
+        report_claude_manual_recovery "generated Claude state was preserved because its non-MCP baseline was not confirmed" "$state"
+        return 1
+    fi
+
+    state_directory="$(dirname "$state")"
+    recovery_directory="$(mktemp -d "$state_directory/.claude.json.rollback.XXXXXX")" || {
+        report_claude_manual_recovery "a private generated Claude state recovery location could not be created" "$state"
+        return 1
+    }
+    if ! chmod 0700 "$recovery_directory"; then
+        report_claude_manual_recovery "the generated Claude state recovery location could not be made private" "$state" "" "" "" "$recovery_directory"
+        return 1
+    fi
+    displaced_state="$recovery_directory/displaced-state"
+    baseline_file="$recovery_directory/generated-baseline"
+    if ! mv -T -- "$state" "$displaced_state"; then
+        rmdir -- "$recovery_directory" 2>/dev/null || true
+        report_claude_manual_recovery "the generated Claude state could not be displaced safely for rollback" "$state" "" "" "" "$recovery_directory"
+        return 1
+    fi
+
+    if ! displaced_generated_claude_state_is_exact "$displaced_state" "$expected_non_mcp" "$expected_unmanaged" "${confirmed_additions[@]}"; then
+        recover_displaced_claude_state "the displaced generated Claude state contained unexpected or unconfirmed content" "$state" "" "$displaced_state" "" "$recovery_directory"
+        return 1
+    fi
+
+    if [[ "$expected_non_mcp" == '{}' && "$expected_unmanaged" == '{}' ]]; then
+        if [[ -e "$state" || -L "$state" ]]; then
+            report_claude_manual_recovery "another Claude state appeared while the proven-empty generated state was being rolled back" "$state" "" "$displaced_state" "" "$recovery_directory"
+            return 1
+        fi
+        if ! rm -f -- "$displaced_state" || ! rmdir -- "$recovery_directory"; then
+            report_claude_manual_recovery "the proven-empty generated Claude state could not be removed cleanly" "$state" "" "$displaced_state" "" "$recovery_directory"
+            return 1
+        fi
+        info "removed the proven-empty generated Claude state"
+        return 0
+    fi
+
+    generated_mode="$(stat -c '%a' "$displaced_state" 2>/dev/null)" || {
+        recover_displaced_claude_state "the generated Claude state mode could not be read for rollback" "$state" "" "$displaced_state" "" "$recovery_directory"
+        return 1
+    }
+    if ! create_generated_claude_baseline_file "$displaced_state" "$baseline_file" "$generated_mode" "$expected_non_mcp" "$expected_unmanaged"; then
+        recover_displaced_claude_state "the generated non-MCP Claude baseline could not be prepared for rollback" "$state" "" "$displaced_state" "$baseline_file" "$recovery_directory"
+        return 1
+    fi
+    if ! ln -T -- "$baseline_file" "$state"; then
+        recover_displaced_claude_state "the generated non-MCP Claude baseline could not be installed without replacing another state" "$state" "" "$displaced_state" "$baseline_file" "$recovery_directory"
+        return 1
+    fi
+    if ! rm -f -- "$baseline_file" "$displaced_state" || ! rmdir -- "$recovery_directory"; then
+        report_claude_manual_recovery "the generated Claude baseline was restored but recovery material could not be removed" "$state" "" "$displaced_state" "$baseline_file" "$recovery_directory"
+        return 1
+    fi
+    info "rolled back confirmed Claude MCP additions while preserving generated Claude metadata"
+}
+
+configure_claude_mcp_servers() {
+    local declaration="$DOTFILES/claude/mcp-servers.json"
+    local state="$HOME/.claude.json"
+    local snapshot="" original_mode="" original_state=0 fresh_baseline_captured=0
+    local expected_non_mcp='{}' expected_unmanaged='{}' expected_managed='{}'
+    local snapshot_state current_state generated_state name desired_record current_record
+    local next_expected_managed record_status transaction_failed=0 transaction_failure=""
+    local -a names=(jira confluence)
+    local -a confirmed_additions=()
+
+    have jq && have python3 && have claude || return 1
+    if [[ -n "${CLAUDE_CONFIG_DIR:-}" ]]; then
+        info "CLAUDE_CONFIG_DIR must be unset so the installer can protect $state" >&2
+        return 1
+    fi
+    claude_mcp_declaration_is_valid "$declaration" || return 1
+
+    if [[ -e "$state" || -L "$state" ]]; then
+        original_state=1
+        claude_state_is_valid "$state" || return 1
+        if claude_mcp_state_is_exact "$state" "$declaration"; then
+            present "Claude user MCP definitions"
+            return 0
+        fi
+
+        original_mode="$(stat -c '%a' "$state" 2>/dev/null)" || return 1
+        [[ "$original_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+        ensure_backup_dir || return 1
+        snapshot="$BACKUP_DIR/${state#/}"
+        create_claude_state_snapshot "$state" "$snapshot" || return 1
+        snapshot_state="$(canonical_claude_state "$snapshot")" || return 1
+        expected_non_mcp="$(jq -S -c 'del(.mcpServers)' <<< "$snapshot_state" 2>/dev/null)" || return 1
+        expected_unmanaged="$(jq -S -c '(.mcpServers // {}) | with_entries(select(.key != "jira" and .key != "confluence"))' <<< "$snapshot_state" 2>/dev/null)" || return 1
+        expected_managed="$(jq -S -c '(.mcpServers // {}) | with_entries(select(.key == "jira" or .key == "confluence"))' <<< "$snapshot_state" 2>/dev/null)" || return 1
+        current_state="$(canonical_claude_state "$state")" || {
+            report_claude_manual_recovery "Claude state changed after its snapshot was created" "$state" "$snapshot"
+            return 1
+        }
+        if [[ "$current_state" != "$snapshot_state" ]]; then
+            report_claude_manual_recovery "Claude state changed after its snapshot was created" "$state" "$snapshot"
+            return 1
+        fi
+    fi
+
+    if (( ! original_state )) && [[ -e "$state" || -L "$state" ]]; then
+        report_claude_manual_recovery "Claude state appeared before MCP reconciliation began" "$state"
+        return 1
+    fi
+
+    for name in "${names[@]}"; do
+        if (( original_state )); then
+            if ! claude_existing_state_matches_transaction "$state" "$expected_non_mcp" "$expected_unmanaged" "$expected_managed"; then
+                transaction_failed=1
+                transaction_failure="Claude state changed outside the last fully confirmed transaction state"
+                break
+            fi
+        elif (( fresh_baseline_captured )); then
+            if ! displaced_generated_claude_state_is_exact "$state" "$expected_non_mcp" "$expected_unmanaged" "${confirmed_additions[@]}"; then
+                transaction_failed=1
+                transaction_failure="generated Claude state changed outside confirmed MCP additions"
+                break
+            fi
+        elif [[ -e "$state" || -L "$state" ]]; then
+            transaction_failed=1
+            transaction_failure="Claude state appeared before the first managed addition"
+            break
+        fi
+
+        desired_record="$(canonical_declared_claude_record "$declaration" "$name")" || {
+            transaction_failed=1
+            transaction_failure="the desired $name MCP record could not be read"
+            break
+        }
+
+        if (( ! original_state && ! fresh_baseline_captured && ${#confirmed_additions[@]} == 0 )); then
+            if [[ -e "$state" || -L "$state" ]]; then
+                transaction_failed=1
+                transaction_failure="Claude state appeared before the first managed record was read"
+                break
+            fi
+            record_status=1
+            current_record=""
+        elif [[ ! -e "$state" && ! -L "$state" ]]; then
+            record_status=2
+        else
+            lookup_claude_record "$state" "$name" current_record
+            record_status=$?
+        fi
+        if (( record_status == 2 )); then
+            transaction_failed=1
+            transaction_failure="the current $name MCP record could not be read"
+            break
+        fi
+        if (( record_status == 0 )) && [[ "$current_record" == "$desired_record" ]]; then
+            continue
+        fi
+
+        if (( record_status == 0 )); then
+            if ! run_claude_mcp_remove "$name"; then
+                transaction_failed=1
+                transaction_failure="Claude failed while removing the previous $name MCP record"
+                break
+            fi
+            if [[ ! -e "$state" && ! -L "$state" ]]; then
+                record_status=2
+            else
+                lookup_claude_record "$state" "$name" current_record
+                record_status=$?
+            fi
+            if (( record_status != 1 )); then
+                transaction_failed=1
+                transaction_failure="the previous $name MCP record was not confirmed removed"
+                break
+            fi
+            if (( original_state )); then
+                next_expected_managed="$(jq -S -c --arg name "$name" 'del(.[$name])' <<< "$expected_managed" 2>/dev/null)" || {
+                    transaction_failed=1
+                    transaction_failure="the expected managed Claude state could not be advanced after removing $name"
+                    break
+                }
+                if ! claude_existing_state_matches_transaction "$state" "$expected_non_mcp" "$expected_unmanaged" "$next_expected_managed"; then
+                    transaction_failed=1
+                    transaction_failure="the complete Claude state after removing $name was not fully confirmed"
+                    break
+                fi
+                expected_managed="$next_expected_managed"
+            elif ! claude_unrelated_state_matches "$state" "$expected_non_mcp" "$expected_unmanaged"; then
+                transaction_failed=1
+                transaction_failure="unrelated Claude state changed while removing $name"
+                break
+            fi
+        fi
+
+        if (( ! original_state && ! fresh_baseline_captured && ${#confirmed_additions[@]} == 0 )) &&
+           [[ -e "$state" || -L "$state" ]]; then
+            transaction_failed=1
+            transaction_failure="Claude state appeared immediately before the first managed addition"
+            break
+        fi
+        if ! run_claude_mcp_add "$name" "$desired_record"; then
+            transaction_failed=1
+            transaction_failure="Claude failed while adding the $name MCP record"
+            break
+        fi
+        if [[ ! -e "$state" && ! -L "$state" ]]; then
+            record_status=2
+        else
+            lookup_claude_record "$state" "$name" current_record
+            record_status=$?
+        fi
+        if (( record_status != 0 )) || [[ "$current_record" != "$desired_record" ]]; then
+            transaction_failed=1
+            transaction_failure="the added $name MCP record could not be confirmed"
+            break
+        fi
+        if (( original_state )); then
+            next_expected_managed="$(jq -S -c --arg name "$name" --argjson record "$desired_record" '. + {($name): $record}' <<< "$expected_managed" 2>/dev/null)" || {
+                transaction_failed=1
+                transaction_failure="the expected managed Claude state could not be advanced after adding $name"
+                break
+            }
+            if ! claude_existing_state_matches_transaction "$state" "$expected_non_mcp" "$expected_unmanaged" "$next_expected_managed"; then
+                transaction_failed=1
+                transaction_failure="the complete Claude state after adding $name was not fully confirmed"
+                break
+            fi
+            expected_managed="$next_expected_managed"
+        fi
+        confirmed_additions+=("$name" "$desired_record")
+
+        if (( ! original_state && ! fresh_baseline_captured )); then
+            generated_state="$(canonical_claude_state "$state")" || {
+                transaction_failed=1
+                transaction_failure="Claude's generated state could not be captured"
+                break
+            }
+            expected_non_mcp="$(jq -S -c 'del(.mcpServers)' <<< "$generated_state" 2>/dev/null)" || {
+                transaction_failed=1
+                transaction_failure="Claude's generated non-MCP state could not be captured"
+                break
+            }
+            expected_unmanaged="$(jq -S -c '(.mcpServers // {}) | with_entries(select(.key != "jira" and .key != "confluence"))' <<< "$generated_state" 2>/dev/null)" || {
+                transaction_failed=1
+                transaction_failure="Claude's generated unmanaged MCP state could not be captured"
+                break
+            }
+            fresh_baseline_captured=1
+        fi
+
+        if (( original_state )); then
+            if ! claude_existing_state_matches_transaction "$state" "$expected_non_mcp" "$expected_unmanaged" "$expected_managed"; then
+                transaction_failed=1
+                transaction_failure="Claude state changed after the confirmed $name addition"
+                break
+            fi
+        elif ! displaced_generated_claude_state_is_exact "$state" "$expected_non_mcp" "$expected_unmanaged" "${confirmed_additions[@]}"; then
+            transaction_failed=1
+            transaction_failure="generated Claude state contained unexpected content after adding $name"
+            break
+        fi
+    done
+
+    if (( ! transaction_failed )); then
+        if (( original_state )); then
+            if ! claude_existing_state_matches_transaction "$state" "$expected_non_mcp" "$expected_unmanaged" "$expected_managed" ||
+               ! claude_mcp_state_is_exact "$state" "$declaration"; then
+                transaction_failed=1
+                transaction_failure="final Claude MCP verification failed"
+            fi
+        elif (( ! fresh_baseline_captured )) ||
+             ! displaced_generated_claude_state_is_exact "$state" "$expected_non_mcp" "$expected_unmanaged" "${confirmed_additions[@]}" ||
+             ! claude_mcp_state_is_exact "$state" "$declaration"; then
+            transaction_failed=1
+            transaction_failure="final generated Claude MCP verification failed"
+        fi
+    fi
+
+    if (( transaction_failed )); then
+        info "Claude MCP reconciliation failed: $transaction_failure" >&2
+        if (( original_state )); then
+            restore_existing_claude_transaction "$state" "$snapshot" "$original_mode" "$expected_non_mcp" "$expected_unmanaged" "$expected_managed" || true
+        else
+            rollback_new_claude_state "$state" "$fresh_baseline_captured" "$expected_non_mcp" "$expected_unmanaged" "${confirmed_additions[@]}" || true
+        fi
+        return 1
+    fi
+    return 0
 }
 
 install_starship() {
@@ -693,6 +1340,10 @@ validate_required_commands() {
     done
     [[ -f "$HOME/.tmux/plugins/tmux/catppuccin.tmux" ]] || fail "Catppuccin tmux plugin missing"
     [[ -L "$HOME/.codex/hooks.json" ]] || fail "Codex hooks.json link missing"
+    if ! claude_mcp_state_is_exact \
+        "$HOME/.claude.json" "$DOTFILES/claude/mcp-servers.json"; then
+        fail "Claude user MCP definitions missing or invalid"
+    fi
 }
 
 print_summary() {
@@ -707,6 +1358,8 @@ print_summary() {
     for item in "${FAILURES[@]}"; do printf '    x %s\n' "$item"; done
     [[ -n "$BACKUP_DIR" ]] && printf '  backups: %s\n' "$BACKUP_DIR"
     info "post-install: authenticate gh/Claude/Codex/Jira as needed"
+    info "post-install: run 'claude mcp login jira' as needed"
+    info "post-install: run 'claude mcp login confluence' as needed"
     info "post-install: review Codex hooks with /hooks, then restart Claude and Codex"
     info "open a new shell after installation"
 }
@@ -747,6 +1400,9 @@ main() {
     attempt "install sqlit" install_sqlit
     attempt "install Claude" install_claude
 
+    section "Claude MCP servers"
+    attempt "configure Claude user MCP definitions" configure_claude_mcp_servers
+
     section "User-local tools"
     attempt "install Starship" install_starship
     attempt "install zoxide" install_zoxide
@@ -775,4 +1431,6 @@ main() {
     (( ${#FAILURES[@]} == 0 ))
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

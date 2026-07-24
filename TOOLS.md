@@ -1,80 +1,205 @@
-# Tools
+# Tool manifest
 
-Inventory of the CLI tools and tmux plugins these dotfiles depend on. Run
-[`install-tools.sh`](install-tools.sh) to install everything below; it skips any
-tool already on `PATH`. No versions are pinned — latest is installed.
+[`install.sh`](install.sh) is the only supported installer. Run it as a normal
+user with no arguments:
 
-## Prerequisites (assumed present)
+```bash
+./install.sh
+```
 
-These managers are used to install the tools and are not installed by the script:
+The installer uses `sudo` only for system packages and puts user-managed
+software under `~/.local`, `~/.cargo`, `~/.nvm`, and the other paths called out
+below. Existing commands on `PATH` are normally retained. Upstream versions
+are resolved when the installer runs; they are not repository-pinned. Cargo
+installs always use `--locked`, and tmux and Neovim have enforced minimum
+versions.
 
-- **Rust / cargo** — https://rustup.rs
-- **Go** — https://go.dev/dl/
-- **Node / npm** — https://github.com/nvm-sh/nvm
-- **uv** — https://github.com/astral-sh/uv
+## Supported systems and prerequisites
 
-## Cargo (`cargo install`)
+The supported platform is x86_64 Linux with glibc 2.28 or newer and a readable
+`/etc/os-release`:
 
-| Tool | Purpose | Source |
-|------|---------|--------|
-| eza | modern `ls` | https://github.com/eza-community/eza |
-| fd-find (`fd`) | modern `find` | https://github.com/sharkdp/fd |
-| diskus | fast `du` for dir size | https://github.com/sharkdp/diskus |
-| zellij | terminal multiplexer | https://github.com/zellij-org/zellij |
-| csvlens | CSV viewer | https://github.com/YS-L/csvlens |
-| yazi-build (`yazi`, `ya`) | terminal file manager | https://github.com/sxyazi/yazi |
+- Debian and Ubuntu are supported subject to the glibc requirement.
+- RHEL, Rocky Linux, and AlmaLinux major version 8 or newer are supported.
 
-## Go (`go install`)
+The installer requires Bash, a safe non-root `HOME`, network access to the
+listed upstream sources, and working `sudo`. On RHEL itself,
+`subscription-manager` must be able to enable CodeReady Builder. The installer
+enables PowerTools on Rocky/AlmaLinux 8, CRB on newer Rocky/AlmaLinux releases,
+and installs EPEL on all RHEL-family systems.
 
-| Tool | Purpose | Source |
-|------|---------|--------|
-| glow | markdown renderer | https://github.com/charmbracelet/glow |
+System prerequisites are installed through the distribution package manager
+(plus the upstream EPEL release RPM on RHEL-family systems):
 
-## npm (`-g`)
+| Family | Packages |
+| --- | --- |
+| Debian/Ubuntu (`apt`) | `ca-certificates git curl jq fish python3 python3-venv tar unzip zip xz-utils bzip2 findutils bash-completion build-essential cmake ninja-build pkg-config libssl-dev libevent-dev libncurses-dev gettext bison` |
+| RHEL/Rocky/AlmaLinux (`dnf`) | `dnf-plugins-core`, EPEL, then `ca-certificates git curl jq fish python3 tar unzip zip xz bzip2 findutils bash-completion gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config openssl-devel libevent-devel ncurses-devel gettext bison` |
 
-| Tool | Purpose | Source |
-|------|---------|--------|
-| @openai/codex | OpenAI Codex CLI | https://github.com/openai/codex |
+Of those packages, final validation directly requires the commands `git`,
+`curl`, `jq`, `fish`, and `python3`. `findutils` supplies `find`, which the
+installer uses to validate extracted release and source-build layouts. The
+remaining packages support source builds and the configured shell environment.
 
-## uv tools (`uv tool install`)
+## Language toolchains
 
-| Tool | Purpose | Source |
-|------|---------|--------|
-| sqlit-tui (`sqlit`) | SQLite TUI | https://pypi.org/project/sqlit-tui |
+The installer bootstraps each missing toolchain before installing tools that
+depend on it.
 
-## AI CLIs (native installer)
+| Required command | Installation and source | User-local location |
+| --- | --- | --- |
+| `cargo` | Minimal stable Rust via the official [rustup installer](https://sh.rustup.rs) | `~/.cargo` |
+| `go` | Latest stable Linux amd64 archive and published SHA-256 from [go.dev](https://go.dev/dl/) | `~/.local/go` |
+| `node`, `npm` | Latest tagged [NVM](https://github.com/nvm-sh/nvm) release, followed by current Node with the latest npm and a default NVM alias | `$NVM_DIR` (default `~/.nvm`); the installer enables NVM's `current` symlink |
+| `uv` | Official [uv installer](https://astral.sh/uv/install.sh) with path modification disabled | `~/.local/bin` |
 
-| Tool | Purpose | Source |
-|------|---------|--------|
-| claude | Claude Code CLI (native installer → `~/.local/bin/claude`) | https://claude.ai/install.sh |
+## Required command inventory
 
-## fzf (git clone + bundled installer)
+Every command in the following tables is mandatory: `install.sh` checks all of
+them during final validation.
 
-| Tool | Purpose | Source |
-|------|---------|--------|
-| fzf | fuzzy finder (installed to `~/.fzf`) | https://github.com/junegunn/fzf |
+### Cargo tools
 
-## Standalone binaries (release tarball → `~/.local/bin`)
+Each missing command is installed with
+`cargo install --locked --root "$HOME/.local" <crate>` from the Cargo registry.
 
-Installed via each project's official installer or GitHub release tarball:
+| Crate | Required command | Purpose | Source |
+| --- | --- | --- | --- |
+| `eza` | `eza` | Modern `ls` | [crates.io](https://crates.io/crates/eza) |
+| `fd-find` | `fd` | Modern `find` | [crates.io](https://crates.io/crates/fd-find) |
+| `diskus` | `diskus` | Fast directory-size utility | [crates.io](https://crates.io/crates/diskus) |
+| `zellij` | `zellij` | Terminal multiplexer | [crates.io](https://crates.io/crates/zellij) |
+| `csvlens` | `csvlens` | CSV viewer | [crates.io](https://crates.io/crates/csvlens) |
+| `yazi-fm` | `yazi` | Terminal file manager | [crates.io](https://crates.io/crates/yazi-fm) |
+| `yazi-cli` | `ya` | Yazi command-line companion | [crates.io](https://crates.io/crates/yazi-cli) |
 
-| Tool | Purpose | Source |
-|------|---------|--------|
-| starship | shell prompt | https://github.com/starship/starship |
-| zoxide | smarter `cd` | https://github.com/ajeetdsouza/zoxide |
-| ripgrep (`rg`) | fast `grep` | https://github.com/BurntSushi/ripgrep |
-| btop | resource monitor | https://github.com/aristocratos/btop |
-| duf | disk-usage viewer | https://github.com/muesli/duf |
-| nvim | Neovim editor | https://github.com/neovim/neovim |
-| gh | GitHub CLI | https://github.com/cli/cli |
+`yazi-fm` -> `yazi` and `yazi-cli` -> `ya` are two separate, mandatory,
+locked Cargo installs. Both commands must be present and are installed
+independently.
 
-## tmux plugins (TPM)
+### Language-managed and native CLI tools
 
-Managed by the Tmux Plugin Manager — the script clones TPM, then you press
-`prefix + I` (prefix is `Ctrl-s`) inside tmux to install the rest from the
-`@plugin` lines in `tmux/.tmux.conf`.
+| Required command | Installation | Source |
+| --- | --- | --- |
+| `glow` | `GOBIN=~/.local/bin go install github.com/charmbracelet/glow@latest` | [charmbracelet/glow](https://github.com/charmbracelet/glow) |
+| `codex` | `npm install --global --prefix ~/.local @openai/codex` | [@openai/codex](https://www.npmjs.com/package/@openai/codex) |
+| `sqlit` | `uv tool install sqlit-tui` | [sqlit-tui](https://pypi.org/project/sqlit-tui/) |
+| `claude` | Native installer, requesting `latest` | [claude.ai/install.sh](https://claude.ai/install.sh) |
 
-| Plugin | Purpose | Source |
-|--------|---------|--------|
-| tmux-plugins/tpm | plugin manager | https://github.com/tmux-plugins/tpm |
-| catppuccin/tmux | catppuccin theme (latte) | https://github.com/catppuccin/tmux |
+### User-local tools
+
+| Required command | Installation source | Destination |
+| --- | --- | --- |
+| `starship` | Official [Starship installer](https://starship.rs/install.sh) | `~/.local/bin` |
+| `zoxide` | Official [zoxide installer](https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh) | User-local installer default |
+| `fzf` | Latest [junegunn/fzf](https://github.com/junegunn/fzf) Linux amd64 release | `~/.local/bin/fzf` |
+| `rg` | Latest [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep) x86_64 musl release | `~/.local/bin/rg` |
+| `btop` | Latest [aristocratos/btop](https://github.com/aristocratos/btop) x86_64 musl release | `~/.local/bin/btop` |
+| `duf` | Latest [muesli/duf](https://github.com/muesli/duf) Linux x86_64 release | `~/.local/bin/duf` |
+| `gh` | Latest [cli/cli](https://github.com/cli/cli) Linux amd64 release | `~/.local/bin/gh` |
+| `gitmux` | Latest [arl/gitmux](https://github.com/arl/gitmux) Linux amd64 release | `~/.local/bin/gitmux` |
+
+GitHub release downloads are selected from the latest release metadata. The
+installer verifies a release-provided SHA-256 digest or checksum manifest when
+one is available, rejects unsafe archive members, and verifies that the
+installed executable can answer a version probe. Final validation repeats the
+version probe for `fzf`, `rg`, `btop`, `duf`, `gh`, and `gitmux`.
+
+### tmux and Neovim version fallbacks
+
+- `tmux` 3.2 or newer is required. If `tmux` is absent or too old, the
+  installer downloads the latest [tmux/tmux](https://github.com/tmux/tmux)
+  source release, builds it, and installs it under `~/.local`.
+- Neovim 0.11.2 or newer is required. If `nvim` is absent or too old, the
+  installer first uses the latest
+  [neovim/neovim](https://github.com/neovim/neovim) Linux x86_64 release. If
+  that release binary cannot run, it builds the same release tag from source.
+  The result lives under `~/.local/opt/nvim-<tag>`, with
+  `~/.local/bin/nvim` pointing to it.
+
+## tmux plugins
+
+The installer clones [tmux-plugins/tpm](https://github.com/tmux-plugins/tpm)
+to `~/.tmux/plugins/tpm` when needed and runs TPM's plugin installer. No manual
+`prefix + I` step is required. The tmux configuration declares
+[catppuccin/tmux](https://github.com/catppuccin/tmux) with the Latte flavor;
+final validation requires
+`~/.tmux/plugins/tmux/catppuccin.tmux`. The configured tmux prefix is
+`Ctrl-s`.
+
+## Claude MCP configuration
+
+[`claude/mcp-servers.json`](claude/mcp-servers.json) is the tracked,
+non-secret MCP manifest. Its exact supported schema is:
+
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v1/mcp/authv2"
+    },
+    "confluence": {
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v1/mcp/authv2"
+    }
+  }
+}
+```
+
+Only the managed names `jira` and `confluence` are allowed in this manifest,
+and each record must contain exactly the shown `type` and `url`. The installer
+uses the installed Claude CLI to reconcile these definitions globally at user
+scope with `claude mcp remove --scope user` and
+`claude mcp add-json --scope user`. It preserves every unrelated MCP server
+and every non-MCP field in Claude's local state. The manifest and live state
+must also be duplicate-key-free JSON. Run the installer with
+`CLAUDE_CONFIG_DIR` unset so the one protected state path remains
+`~/.claude.json`.
+
+Before mutating an existing `~/.claude.json`, the installer creates one
+private snapshot in its timestamped backup tree (backup directory mode `0700`,
+snapshot mode `0600`). A matching state needs no snapshot. A failed
+non-concurrent transaction is rolled back only after the installer proves the
+complete last confirmed projection of non-MCP fields, unmanaged servers, and
+the two managed records. If that proof fails, an unconfirmed managed write or
+other unexpected live state is returned to the canonical path without
+clobbering, and the snapshot is preserved for manual recovery.
+
+OAuth and service reachability are deliberately outside installation. Log in
+manually when needed:
+
+```bash
+claude mcp login jira
+claude mcp login confluence
+```
+
+Do not track or symlink `~/.claude.json`, and do not put credentials, OAuth
+tokens, authorization headers, environment secrets, or client secrets in the
+manifest. No MCP credentials, secret-bearing headers, or authentication tokens
+belong in tracked files.
+
+## Other installed runtime content
+
+The installer clones or updates
+[abchoudh-amd/compute-ai-skills](https://github.com/abchoudh-amd/compute-ai-skills)
+at `~/compute-ai-skills` and links its Claude/Codex skills and hooks into the
+corresponding user runtime directories. A dirty checkout or a checkout not on
+`main` is preserved without update. Final validation requires the Codex
+`hooks.json` symlink.
+
+## Final validation contract
+
+The exact required command set is:
+
+```text
+git curl jq fish python3 cargo go node npm uv eza fd diskus zellij csvlens
+yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux
+tmux nvim
+```
+
+In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
+0.11.2, executable release-binary version probes, the Catppuccin plugin, the
+Codex hooks link, and exact `jira`/`confluence` user MCP definitions. Any
+missing requirement makes `./install.sh` exit nonzero after printing its full
+summary.
