@@ -24,6 +24,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "~/.claude/hooks/slurm-mountcheck.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
             "command": "~/.claude/hooks/rocprofiler-compute-precommit.sh"
           }
         ]

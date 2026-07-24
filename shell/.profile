@@ -21,10 +21,19 @@ if [ -d "$HOME/bin" ] ; then
     PATH="$HOME/bin:$PATH"
 fi
 
-# set PATH so it includes user's private bin if it exists
-if [ -d "$HOME/.local/bin" ] ; then
-    PATH="$HOME/.local/bin:$PATH"
-fi
+for user_bin_dir in \
+    "$HOME/.nvm/current/bin" \
+    "$HOME/.cargo/bin" \
+    "$HOME/.local/go/bin" \
+    "$HOME/.local/bin"
+do
+    case ":$PATH:" in
+        *":$user_bin_dir:"*) ;;
+        *) PATH="$user_bin_dir:$PATH" ;;
+    esac
+done
+unset user_bin_dir
+export PATH
 
-. "$HOME/.local/bin/env"
-. "$HOME/.cargo/env"
+[ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env"
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"

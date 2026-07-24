@@ -116,7 +116,21 @@ if ! shopt -oq posix; then
   fi
 fi
 
-. "$HOME/.local/bin/env"
+for user_bin_dir in \
+    "$HOME/.nvm/current/bin" \
+    "$HOME/.cargo/bin" \
+    "$HOME/.local/go/bin" \
+    "$HOME/.local/bin"
+do
+    case ":$PATH:" in
+        *":$user_bin_dir:"*) ;;
+        *) PATH="$user_bin_dir:$PATH" ;;
+    esac
+done
+unset user_bin_dir
+export PATH
+
+[ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env"
 
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
@@ -136,7 +150,7 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="Claude-Haiku-4.5"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
 
-. "$HOME/.cargo/env"
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
 function y() {
 	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
@@ -160,8 +174,19 @@ alias vi="nvim"
 alias vimdiff="nvim -d"
 export EDITOR="nvim"
 
-eval "$(starship init bash)"
-eval "$(zoxide init bash)"
-[ -f ~/.fzf.bash ] && source ~/.fzf.bash
-eval "$(fzf --bash)"
+export ROCM_PATH="$HOME/rocm-nightly/gfx950"
+export PATH="$ROCM_PATH/bin:$PATH"
+export LD_LIBRARY_PATH="$ROCM_PATH/lib:$ROCM_PATH/lib64:$LD_LIBRARY_PATH"
 
+if command -v starship >/dev/null 2>&1; then
+    eval "$(starship init bash)"
+fi
+
+if command -v zoxide >/dev/null 2>&1; then
+    eval "$(zoxide init bash)"
+fi
+
+if command -v fzf >/dev/null 2>&1; then
+    [ -f "$HOME/.fzf.bash" ] && . "$HOME/.fzf.bash"
+    eval "$(fzf --bash)"
+fi
