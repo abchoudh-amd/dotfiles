@@ -59,7 +59,7 @@ summary requests it.
 | Prompt          | `config/starship.toml`                                                |
 | Claude Code     | settings, status line, theme, and `claude/mcp-servers.json`           |
 | Codex           | `codex/config.toml` (key read from `$LLM_GATEWAY_KEY` at runtime)     |
-| Editors / TUI   | `config/nvim`, `config/fish`, `config/zellij`, `config/btop`          |
+| Editors / TUI   | `config/nvim`, `config/fish`, `config/btop`                           |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
 
 ## Reruns, backups, and recovery

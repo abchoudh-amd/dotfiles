@@ -68,7 +68,6 @@ Each missing command is installed with
 | `eza` | `eza` | Modern `ls` | [crates.io](https://crates.io/crates/eza) |
 | `fd-find` | `fd` | Modern `find` | [crates.io](https://crates.io/crates/fd-find) |
 | `diskus` | `diskus` | Fast directory-size utility | [crates.io](https://crates.io/crates/diskus) |
-| `zellij` | `zellij` | Terminal multiplexer | [crates.io](https://crates.io/crates/zellij) |
 | `csvlens` | `csvlens` | CSV viewer | [crates.io](https://crates.io/crates/csvlens) |
 | `yazi-fm` | `yazi` | Terminal file manager | [crates.io](https://crates.io/crates/yazi-fm) |
 | `yazi-cli` | `ya` | Yazi command-line companion | [crates.io](https://crates.io/crates/yazi-cli) |
@@ -193,7 +192,7 @@ corresponding user runtime directories. A dirty checkout or a checkout not on
 The exact required command set is:
 
 ```text
-git curl jq fish python3 cargo go node npm uv eza fd diskus zellij csvlens
+git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
 yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux
 tmux nvim
 ```

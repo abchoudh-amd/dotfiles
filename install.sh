@@ -1195,7 +1195,6 @@ link_dotfiles() {
         "$DOTFILES/config/starship.toml|$HOME/.config/starship.toml"
         "$DOTFILES/config/nvim|$HOME/.config/nvim"
         "$DOTFILES/config/fish|$HOME/.config/fish"
-        "$DOTFILES/config/zellij/config.kdl|$HOME/.config/zellij/config.kdl"
         "$DOTFILES/config/btop/btop.conf|$HOME/.config/btop/btop.conf"
         "$DOTFILES/claude/settings.json|$HOME/.claude/settings.json"
         "$DOTFILES/claude/statusline.sh|$HOME/.claude/statusline.sh"
@@ -1321,7 +1320,7 @@ install_compute_skills() {
 validate_required_commands() {
     local command_name
     local -a commands=(
-        git curl jq fish python3 cargo go node npm uv eza fd diskus zellij csvlens
+        git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
         yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux tmux nvim
     )
     for command_name in "${commands[@]}"; do
@@ -1389,7 +1388,6 @@ main() {
     attempt "install eza" install_cargo_tool eza eza
     attempt "install fd" install_cargo_tool fd-find fd
     attempt "install diskus" install_cargo_tool diskus diskus
-    attempt "install zellij" install_cargo_tool zellij zellij
     attempt "install csvlens" install_cargo_tool csvlens csvlens
     attempt "install yazi" install_cargo_tool yazi-fm yazi
     attempt "install ya" install_cargo_tool yazi-cli ya

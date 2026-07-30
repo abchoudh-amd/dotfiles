@@ -695,7 +695,6 @@ prepare_link_case_sources() {
         git/.gitconfig
         git/gitignore
         config/starship.toml
-        config/zellij/config.kdl
         config/btop/btop.conf
         claude/settings.json
         claude/statusline.sh
@@ -1620,7 +1619,7 @@ test_failure_bookkeeping_continues_and_is_nonzero() {
 test_final_validation_checks_definitions_without_claude_calls() {
     local state missing_command
     local -a required_commands=(
-        git curl jq fish python3 cargo go node npm uv eza fd diskus zellij csvlens
+        git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
         yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux tmux nvim
     )
     new_case || return 1
@@ -1666,7 +1665,7 @@ test_final_validation_checks_definitions_without_claude_calls() {
 
 test_main_inventory_requires_both_yazi_commands() {
     local expected
-    expected=$'install_cargo_tool eza eza\ninstall_cargo_tool fd-find fd\ninstall_cargo_tool diskus diskus\ninstall_cargo_tool zellij zellij\ninstall_cargo_tool csvlens csvlens\ninstall_cargo_tool yazi-fm yazi\ninstall_cargo_tool yazi-cli ya'
+    expected=$'install_cargo_tool eza eza\ninstall_cargo_tool fd-find fd\ninstall_cargo_tool diskus diskus\ninstall_cargo_tool csvlens csvlens\ninstall_cargo_tool yazi-fm yazi\ninstall_cargo_tool yazi-cli ya'
     new_case || return 1
     run_main_inventory
     require_equal "inventory-only main execution succeeds" 0 "$CASE_STATUS" || return 1
@@ -3020,7 +3019,7 @@ container_record_install_call() {
 container_expected_validation_have_log() {
     local command_name
     local -a required_commands=(
-        git curl jq fish python3 cargo go node npm uv eza fd diskus zellij csvlens
+        git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
         yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux tmux nvim
     )
     for command_name in "${required_commands[@]}"; do
