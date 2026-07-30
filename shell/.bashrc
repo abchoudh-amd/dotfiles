@@ -120,7 +120,8 @@ for user_bin_dir in \
     "$HOME/.nvm/current/bin" \
     "$HOME/.cargo/bin" \
     "$HOME/.local/go/bin" \
-    "$HOME/.local/bin"
+    "$HOME/.local/bin" \
+    "$HOME/.local/roc-optiq/bin"
 do
     case ":$PATH:" in
         *":$user_bin_dir:"*) ;;
@@ -142,10 +143,10 @@ export NVM_DIR="$HOME/.nvm"
 export ANTHROPIC_API_KEY="dummy"
 export ANTHROPIC_BASE_URL="https://llm-api.amd.com/Anthropic"
 export ANTHROPIC_CUSTOM_HEADERS="Ocp-Apim-Subscription-Key: ${LLM_GATEWAY_KEY}"
-export ANTHROPIC_MODEL="Claude-Opus-4.8[1m]"
+export ANTHROPIC_MODEL="Claude-Opus-5[1m]"
 export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="Claude-Opus-4.8[1m]"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="Claude-Sonnet-4.6"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="Claude-Opus-5[1m]"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="Claude-Sonnet-5"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="Claude-Haiku-4.5"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1

@@ -68,11 +68,13 @@
       }
     ]
   },
+  "enableWorkflows": true,
   "statusLine": {
     "type": "command",
     "command": "~/.claude/claude-statusline"
   },
   "alwaysThinkingEnabled": true,
+  "ultracode": true,
   "voice": {
     "enabled": true,
     "mode": "tap"

@@ -25,10 +25,11 @@ segment() {
 map_model() {
   case "$1" in
     calude-fable-5*) printf 'Fable 5' ;;
-    Claude-Opus-4.8*) printf 'Opus 4.8' ;;
+    Claude-Opus-5*) printf 'Opus 5' ;;
     opus) printf 'Opus 4.8' ;;
     sonnet) printf 'Sonnet 4.6' ;;
     haiku) printf 'Haiku 4.5' ;;
+    claude-opus-5*) printf 'Opus 5' ;;
     claude-opus-4-8*) printf 'Opus 4.8' ;;
     claude-opus-4-7*) printf 'Opus 4.7' ;;
     claude-sonnet-4-6*) printf 'Sonnet 4.6' ;;
