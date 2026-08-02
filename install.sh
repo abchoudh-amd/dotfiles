@@ -244,6 +244,19 @@ install_release_binary() {
     info "installed $label -> $destination"
 }
 
+install_herdr() {
+    if have herdr; then
+        if binary_version_works "$(command -v herdr)"; then
+            present herdr
+            return 0
+        fi
+        warn "herdr on PATH cannot complete a version probe; reinstalling with the official installer"
+    fi
+    curl -fsSL https://herdr.dev/install.sh | sh || return 1
+    have herdr || return 1
+    binary_version_works "$(command -v herdr)"
+}
+
 preflight() {
     local architecture glibc_line
     [[ $# -eq 0 ]] || { info "usage: ./install.sh" >&2; return 2; }
@@ -1199,6 +1212,7 @@ link_dotfiles() {
         "$DOTFILES/claude/settings.json|$HOME/.claude/settings.json"
         "$DOTFILES/claude/statusline.sh|$HOME/.claude/statusline.sh"
         "$DOTFILES/claude/claude-statusline|$HOME/.claude/claude-statusline"
+        "$DOTFILES/claude/hooks/herdr-agent-state.sh|$HOME/.claude/hooks/herdr-agent-state.sh"
         "$DOTFILES/claude/themes/snazzy-light.json|$HOME/.claude/themes/snazzy-light.json"
         "$DOTFILES/codex/config.toml|$HOME/.codex/config.toml"
         "$DOTFILES/tmux/.tmux.conf|$HOME/.tmux.conf"
@@ -1295,6 +1309,7 @@ link_runtime_tree() {
 
 install_compute_skills() {
     local origin branch status
+    local herdr_hook_source="$COMPUTE_SKILLS/.codex/hooks/herdr-agent-state.sh"
     if [[ ! -e "$COMPUTE_SKILLS" ]]; then
         GIT_TERMINAL_PROMPT=0 git clone --branch main \
             https://github.com/abchoudh-amd/compute-ai-skills.git "$COMPUTE_SKILLS" || return 1
@@ -1310,18 +1325,96 @@ install_compute_skills() {
     else
         warn "$COMPUTE_SKILLS is dirty or not on main; preserving it without update"
     fi
+    if [[ ! -f "$herdr_hook_source" ]]; then
+        info "required compute-ai-skills HERDR hook missing: $herdr_hook_source" >&2
+        return 1
+    fi
+    if [[ ! -x "$herdr_hook_source" ]]; then
+        info "required compute-ai-skills HERDR hook is not executable: $herdr_hook_source" >&2
+        return 1
+    fi
     link_runtime_tree "$COMPUTE_SKILLS/.claude/skills" "$HOME/.claude/skills" || return 1
     link_runtime_tree "$COMPUTE_SKILLS/.claude/hooks" "$HOME/.claude/hooks" || return 1
     link_runtime_tree "$COMPUTE_SKILLS/.codex/skills" "$HOME/.codex/skills" || return 1
     link_runtime_tree "$COMPUTE_SKILLS/.codex/hooks" "$HOME/.codex/hooks" || return 1
+    link_path "$herdr_hook_source" "$HOME/.codex/herdr-agent-state.sh" || return 1
     link_path "$COMPUTE_SKILLS/.codex/hooks.json" "$HOME/.codex/hooks.json" || return 1
+}
+
+herdr_hook_is_valid() {
+    local hook="$1" expected_source="$2" expected_integration_id="$3"
+    local integration_id_marker_count expected_id_marker_count
+    local version_marker_count all_version_marker_count
+    [[ -L "$hook" && -x "$hook" ]] || return 1
+    [[ "$(readlink "$hook")" == "$expected_source" ]] || return 1
+    integration_id_marker_count="$(grep -Ec '^# HERDR_INTEGRATION_ID=' "$hook" || true)"
+    expected_id_marker_count="$(grep -Fxc "# HERDR_INTEGRATION_ID=$expected_integration_id" "$hook" || true)"
+    version_marker_count="$(grep -Ec '^# HERDR_INTEGRATION_VERSION=[1-9][0-9]*$' "$hook" || true)"
+    all_version_marker_count="$(grep -Ec '^# HERDR_INTEGRATION_VERSION=' "$hook" || true)"
+    [[ "$integration_id_marker_count" == 1 && "$expected_id_marker_count" == 1 &&
+       "$version_marker_count" == 1 && "$all_version_marker_count" == 1 ]]
+}
+
+claude_herdr_session_start_is_exact() {
+    local settings="$1"
+    json_document_has_unique_object_keys "$settings" || return 1
+    jq -e --arg expected_command 'bash "$HOME/.claude/hooks/herdr-agent-state.sh" session' '
+        if (.hooks.SessionStart | type) != "array" then
+            false
+        else
+            ([
+                .hooks.SessionStart[]
+                | select(. == {
+                    matcher: "*",
+                    hooks: [{
+                        type: "command",
+                        command: $expected_command,
+                        timeout: 10
+                    }]
+                })
+            ] | length) == 1
+            and ([
+                .hooks.SessionStart
+                | ..
+                | objects
+                | select(.command? == $expected_command)
+            ] | length) == 1
+        end
+    ' "$settings" >/dev/null
+}
+
+codex_herdr_session_start_is_exact() {
+    local hooks="$1"
+    json_document_has_unique_object_keys "$hooks" || return 1
+    jq -e --arg expected_command 'bash "$HOME/.codex/herdr-agent-state.sh" session' '
+        if (.hooks.SessionStart | type) != "array" then
+            false
+        else
+            ([
+                .hooks.SessionStart[]
+                | select(. == {
+                    hooks: [{
+                        type: "command",
+                        command: $expected_command,
+                        timeout: 10
+                    }]
+                })
+            ] | length) == 1
+            and ([
+                .hooks.SessionStart
+                | ..
+                | objects
+                | select(.command? == $expected_command)
+            ] | length) == 1
+        end
+    ' "$hooks" >/dev/null
 }
 
 validate_required_commands() {
     local command_name
     local -a commands=(
         git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
-        yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux tmux nvim
+        yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux herdr tmux nvim
     )
     for command_name in "${commands[@]}"; do
         have "$command_name" || fail "required command missing: $command_name"
@@ -1332,13 +1425,34 @@ validate_required_commands() {
     if have nvim && ! version_ge "$(nvim_version)" 0.11.2; then
         fail "Neovim 0.11.2+ required"
     fi
-    for command_name in fzf rg btop duf gh gitmux; do
+    for command_name in fzf rg btop duf gh gitmux herdr; do
         if have "$command_name" && ! binary_version_works "$(command -v "$command_name")"; then
             fail "required command cannot execute a version probe: $command_name"
         fi
     done
     [[ -f "$HOME/.tmux/plugins/tmux/catppuccin.tmux" ]] || fail "Catppuccin tmux plugin missing"
     [[ -L "$HOME/.codex/hooks.json" ]] || fail "Codex hooks.json link missing"
+    if ! herdr_hook_is_valid \
+        "$HOME/.claude/hooks/herdr-agent-state.sh" \
+        "$DOTFILES/claude/hooks/herdr-agent-state.sh" claude; then
+        fail "Claude HERDR hook link missing or invalid"
+    fi
+    if ! herdr_hook_is_valid \
+        "$HOME/.codex/hooks/herdr-agent-state.sh" \
+        "$COMPUTE_SKILLS/.codex/hooks/herdr-agent-state.sh" codex; then
+        fail "Codex HERDR hook-tree link missing or invalid"
+    fi
+    if ! herdr_hook_is_valid \
+        "$HOME/.codex/herdr-agent-state.sh" \
+        "$COMPUTE_SKILLS/.codex/hooks/herdr-agent-state.sh" codex; then
+        fail "Codex HERDR runtime hook link missing or invalid"
+    fi
+    if ! claude_herdr_session_start_is_exact "$HOME/.claude/settings.json"; then
+        fail "Claude HERDR SessionStart hook missing or invalid"
+    fi
+    if ! codex_herdr_session_start_is_exact "$HOME/.codex/hooks.json"; then
+        fail "Codex HERDR SessionStart hook missing or invalid"
+    fi
     if ! claude_mcp_state_is_exact \
         "$HOME/.claude.json" "$DOTFILES/claude/mcp-servers.json"; then
         fail "Claude user MCP definitions missing or invalid"
@@ -1410,6 +1524,7 @@ main() {
     attempt "install duf" install_release_binary duf duf muesli/duf '^duf_[^_]+_linux_x86_64\.tar\.gz$' duf
     attempt "install GitHub CLI" install_release_binary gh gh cli/cli '^gh_[^_]+_linux_amd64\.tar\.gz$' gh
     attempt "install gitmux" install_release_binary gitmux gitmux arl/gitmux '^gitmux_v[^_]+_linux_amd64\.tar\.gz$' gitmux
+    attempt "install herdr" install_herdr
     attempt "install tmux 3.2+" install_tmux
     attempt "install Neovim 0.11.2+" install_neovim
 

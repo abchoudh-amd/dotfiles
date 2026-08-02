@@ -207,6 +207,25 @@ blocked_command_main() {
     return 97
 }
 
+herdr_installer_sh_stub_main() {
+    local argument line
+    : "${HERDR_INSTALLER_SH_LOG:?}"
+    : "${HERDR_INSTALLER_SH_INPUT:?}"
+    : "${HERDR_REAL_SH:?}"
+    {
+        printf 'sh'
+        for argument in "$@"; do
+            printf ' %q' "$argument"
+        done
+        printf '\n'
+    } >> "$HERDR_INSTALLER_SH_LOG"
+    : > "$HERDR_INSTALLER_SH_INPUT"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        printf '%s\n' "$line" >> "$HERDR_INSTALLER_SH_INPUT"
+    done
+    "$HERDR_REAL_SH" < "$HERDR_INSTALLER_SH_INPUT"
+}
+
 installer_fixture_command_main() {
     local argument command_name="${0##*/}"
     : "${INSTALL_FIXTURE_LOG:?}"
@@ -347,6 +366,14 @@ case "${0##*/}" in
             installer_fixture_command_main "$@"
         else
             blocked_command_main "$@"
+        fi
+        exit $?
+        ;;
+    sh)
+        if [[ "${HERDR_INSTALLER_SH_FIXTURE_MODE:-}" == 1 ]]; then
+            herdr_installer_sh_stub_main "$@"
+        else
+            exit 64
         fi
         exit $?
         ;;
@@ -533,7 +560,7 @@ new_case() {
     local command_name command_path blocked_name
     local -a allowed_commands=(
         awk basename bash chmod cp date dirname env find grep head install jq ln mkdir mktemp
-        python3 readlink rm rmdir sed sha256sum sort stat tar timeout wc
+        python3 readlink rm rmdir sed sh sha256sum sort stat tar timeout wc
     )
     local -a blocked_commands=(
         apt-get curl dnf git ssh subscription-manager sudo wget
@@ -667,6 +694,7 @@ run_package_failure_main() {
             install_starship() { return 0; }
             install_zoxide() { return 0; }
             install_release_binary() { return 0; }
+            install_herdr() { return 0; }
             install_tmux() { return 0; }
             install_neovim() { return 0; }
             link_dotfiles() { return 0; }
@@ -699,6 +727,7 @@ prepare_link_case_sources() {
         claude/settings.json
         claude/statusline.sh
         claude/claude-statusline
+        claude/hooks/herdr-agent-state.sh
         claude/themes/snazzy-light.json
         codex/config.toml
         tmux/.tmux.conf
@@ -712,6 +741,7 @@ prepare_link_case_sources() {
         mkdir -p "$CASE_REPOSITORY/${path%/*}" || return 1
         printf 'fixture source: %s\n' "$path" > "$CASE_REPOSITORY/$path" || return 1
     done
+    chmod 0755 "$CASE_REPOSITORY/claude/hooks/herdr-agent-state.sh" || return 1
 }
 
 run_link_dotfiles() {
@@ -875,6 +905,197 @@ run_release_binary_member_fixture() {
     return 0
 }
 
+write_herdr_command_fixture() {
+    local destination="$1" label="$2" behavior="$3"
+    mkdir -p "${destination%/*}" || return 1
+    if [[ "$behavior" == working ]]; then
+        printf '%s\n' \
+            '#!/bin/sh' \
+            "printf '%s %s\\n' '$label' \"\$*\" >> \"\$HERDR_VERSION_LOG\"" \
+            'case "${1:-}" in' \
+            '  --version|-V) printf "herdr 0.7.5\n"; exit 0 ;;' \
+            '  *) exit 0 ;;' \
+            'esac' \
+            > "$destination" || return 1
+    else
+        printf '%s\n' \
+            '#!/bin/sh' \
+            "printf '%s %s\\n' '$label' \"\$*\" >> \"\$HERDR_VERSION_LOG\"" \
+            'exit 91' \
+            > "$destination" || return 1
+    fi
+    chmod 0755 "$destination"
+}
+
+run_herdr_install_fixture() {
+    local initial_state="$1" installer_mode="$2"
+    local installed_fixture="$CASE_ROOT/installer-herdr"
+    local installer_bytes_fixture="$CASE_ROOT/herdr-installer-bytes.sh"
+    local herdr="$CASE_HOME/.local/bin/herdr"
+    local real_sh
+    real_sh="$(command -v sh)" || return 1
+    mkdir -p "$CASE_HOME/.local/bin" || return 1
+    : > "$CASE_ROOT/herdr-curl.log"
+    : > "$CASE_ROOT/herdr-installer-sh.log"
+    : > "$CASE_ROOT/herdr-installer-sh-input.sh"
+    : > "$CASE_ROOT/herdr-timeout.log"
+    : > "$CASE_ROOT/herdr-version.log"
+    : > "$installer_bytes_fixture"
+    rm -f -- "$installed_fixture" "$CASE_ROOT/herdr-posix-sh.marker"
+    case "$initial_state" in
+        missing) rm -f -- "$herdr" ;;
+        working) write_herdr_command_fixture "$herdr" initial working || return 1 ;;
+        broken) write_herdr_command_fixture "$herdr" initial broken || return 1 ;;
+        preserve) [[ -x "$herdr" ]] || return 1 ;;
+        *) return 2 ;;
+    esac
+    case "$installer_mode" in
+        success)
+            write_herdr_command_fixture "$installed_fixture" installed working || return 1
+            printf '%s\n' \
+                'mkdir -p "$HOME/.local/bin"' \
+                'install -m 0755 "$HERDR_INSTALL_BINARY_FIXTURE" "$HOME/.local/bin/herdr"' \
+                'printf "posix-sh-consumed\n" > "$HERDR_POSIX_SH_MARKER"' \
+                > "$installer_bytes_fixture" || return 1
+            ;;
+        broken-post-install)
+            write_herdr_command_fixture "$installed_fixture" installed broken || return 1
+            printf '%s\n' \
+                'mkdir -p "$HOME/.local/bin"' \
+                'install -m 0755 "$HERDR_INSTALL_BINARY_FIXTURE" "$HOME/.local/bin/herdr"' \
+                'printf "posix-sh-consumed\n" > "$HERDR_POSIX_SH_MARKER"' \
+                > "$installer_bytes_fixture" || return 1
+            ;;
+        curl-failure|unused) ;;
+        installer-shell-failure)
+            printf '%s\n' 'exit 72' > "$installer_bytes_fixture" || return 1
+            ;;
+        missing-post-install)
+            printf '%s\n' ':' > "$installer_bytes_fixture" || return 1
+            ;;
+        *) return 2 ;;
+    esac
+    ln -sfn "$SCRIPT_PATH" "$CASE_BIN/sh" || return 1
+    env -i \
+        HOME="$CASE_HOME" \
+        PATH="$CASE_HOME/.local/bin:$CASE_BIN" \
+        LANG=C \
+        LC_ALL=C \
+        TMPDIR="$CASE_TMP" \
+        CASE_REPOSITORY="$CASE_REPOSITORY" \
+        HERDR_CURL_LOG="$CASE_ROOT/herdr-curl.log" \
+        HERDR_INSTALLER_BYTES_FIXTURE="$installer_bytes_fixture" \
+        HERDR_INSTALLER_SH_FIXTURE_MODE=1 \
+        HERDR_INSTALLER_SH_INPUT="$CASE_ROOT/herdr-installer-sh-input.sh" \
+        HERDR_INSTALLER_SH_LOG="$CASE_ROOT/herdr-installer-sh.log" \
+        HERDR_TIMEOUT_LOG="$CASE_ROOT/herdr-timeout.log" \
+        HERDR_VERSION_LOG="$CASE_ROOT/herdr-version.log" \
+        HERDR_INSTALL_BINARY_FIXTURE="$installed_fixture" \
+        HERDR_INSTALLER_MODE="$installer_mode" \
+        HERDR_POSIX_SH_MARKER="$CASE_ROOT/herdr-posix-sh.marker" \
+        HERDR_REAL_SH="$real_sh" \
+        bash -c '
+            source "$CASE_REPOSITORY/install.sh"
+            timeout() {
+                local argument duration
+                {
+                    printf "timeout"
+                    for argument in "$@"; do printf " %q" "$argument"; done
+                    printf "\n"
+                } >> "$HERDR_TIMEOUT_LOG"
+                duration="$1"
+                shift
+                [[ "$duration" == 10 ]] || return 96
+                "$@"
+            }
+            curl() {
+                local argument line
+                {
+                    printf "curl"
+                    for argument in "$@"; do printf " %q" "$argument"; done
+                    printf "\n"
+                } >> "$HERDR_CURL_LOG"
+                case "$HERDR_INSTALLER_MODE" in
+                    curl-failure) return 71 ;;
+                    unused) return 93 ;;
+                    success|broken-post-install|installer-shell-failure|missing-post-install)
+                        while IFS= read -r line || [[ -n "$line" ]]; do
+                            printf "%s\n" "$line"
+                        done < "$HERDR_INSTALLER_BYTES_FIXTURE"
+                        ;;
+                    *) return 94 ;;
+                esac
+            }
+            install_herdr
+            status=$?
+            printf "STATUS=%s\n" "$status"
+            exit "$status"
+        ' > "$CASE_OUTPUT" 2>&1
+    CASE_STATUS=$?
+    return 0
+}
+
+run_herdr_hook_socket_fixture() {
+    local hook="$1" agent="$2"
+    local socket_path="$CASE_ROOT/herdr-$agent.sock"
+    local ready_file="$CASE_ROOT/herdr-$agent.ready"
+    local request_file="$CASE_ROOT/herdr-$agent-request.json"
+    local server_output="$CASE_ROOT/herdr-$agent-server.log"
+    local server_pid server_status=0 hook_status=0 attempt_number
+    rm -f -- "$socket_path" "$ready_file" "$request_file"
+    python3 - "$socket_path" "$ready_file" "$request_file" \
+        > "$server_output" 2>&1 <<'PY' &
+import pathlib
+import socket
+import sys
+
+socket_path, ready_file, request_file = sys.argv[1:]
+server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+server.bind(socket_path)
+server.listen(1)
+server.settimeout(3)
+pathlib.Path(ready_file).write_text("ready\n", encoding="utf-8")
+connection, _ = server.accept()
+with connection:
+    chunks = []
+    while True:
+        chunk = connection.recv(4096)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        if b"\n" in chunk:
+            break
+    payload = b"".join(chunks).split(b"\n", 1)[0]
+    pathlib.Path(request_file).write_bytes(payload + b"\n")
+    connection.sendall(b'{"ok":true}\n')
+server.close()
+PY
+    server_pid=$!
+    for attempt_number in $(seq 1 100); do
+        [[ -S "$socket_path" && -f "$ready_file" ]] && break
+        sleep 0.01
+    done
+    if [[ ! -S "$socket_path" || ! -f "$ready_file" ]]; then
+        kill "$server_pid" 2>/dev/null || true
+        wait "$server_pid" 2>/dev/null || true
+        return 1
+    fi
+    printf '%s\n' \
+        "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"$agent-session\",\"transcript_path\":\"$CASE_ROOT/$agent-transcript.jsonl\",\"source\":\"startup\"}" |
+        env -i \
+            HOME="$CASE_HOME" \
+            PATH=/usr/bin:/bin \
+            TMPDIR="$CASE_TMP" \
+            HERDR_ENV=1 \
+            HERDR_SOCKET_PATH="$socket_path" \
+            HERDR_PANE_ID='%42' \
+            "$hook" session > "$CASE_ROOT/herdr-$agent-hook.log" 2>&1 || hook_status=$?
+    wait "$server_pid" || server_status=$?
+    printf 'HOOK_STATUS=%s\nSERVER_STATUS=%s\n' \
+        "$hook_status" "$server_status" > "$CASE_ROOT/herdr-$agent-status.log"
+    return 0
+}
+
 run_unsafe_archive_fixture() {
     local archive_mode="$1"
     : > "$CASE_ROOT/tar.log"
@@ -968,7 +1189,16 @@ prepare_compute_checkout_fixture() {
         "$checkout/.codex/skills/shared-codex-skill/SKILL.md" || return 1
     printf 'fixture\n' > \
         "$checkout/.codex/hooks/shared-codex-hook/hook.sh" || return 1
-    printf '{"hooks":{}}\n' > "$checkout/.codex/hooks.json" || return 1
+    printf '%s\n' \
+        '#!/bin/sh' \
+        '# HERDR_INTEGRATION_ID=codex' \
+        '# HERDR_INTEGRATION_VERSION=6' \
+        'exit 0' \
+        > "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+    chmod 0755 "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+    printf '%s\n' \
+        '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash \\"$HOME/.codex/herdr-agent-state.sh\\" session","timeout":10}]}]}}' \
+        > "$checkout/.codex/hooks.json" || return 1
 }
 
 run_compute_skills_fixture() {
@@ -1011,7 +1241,16 @@ run_compute_skills_fixture() {
                             "$target/.codex/skills/cloned-codex-skill/SKILL.md" || return 72
                         printf "fixture\n" > \
                             "$target/.codex/hooks/cloned-codex-hook/hook.sh" || return 72
-                        printf "{\"hooks\":{}}\n" > "$target/.codex/hooks.json" || return 72
+                        printf "%s\n" \
+                            "#!/bin/sh" \
+                            "# HERDR_INTEGRATION_ID=codex" \
+                            "# HERDR_INTEGRATION_VERSION=6" \
+                            "exit 0" \
+                            > "$target/.codex/hooks/herdr-agent-state.sh" || return 72
+                        chmod 0755 "$target/.codex/hooks/herdr-agent-state.sh" || return 72
+                        printf "%s\n" \
+                            "{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"bash \\\"\\$HOME/.codex/herdr-agent-state.sh\\\" session\",\"timeout\":10}]}]}}" \
+                            > "$target/.codex/hooks.json" || return 72
                         return 0
                     fi
                     return 73
@@ -1141,6 +1380,146 @@ run_final_validation() {
     return 0
 }
 
+prepare_herdr_validation_fixture() {
+    local compute_source="${COMPUTE_SKILLS_SOURCE_ROOT:-$REPOSITORY_ROOT/../compute-ai-skills}"
+    local compute_checkout="$CASE_HOME/compute-ai-skills"
+    [[ -f "$compute_source/.codex/hooks/herdr-agent-state.sh" &&
+       -f "$compute_source/.codex/hooks.json" ]] || return 1
+    mkdir -p "$CASE_REPOSITORY/claude/hooks" \
+        "$CASE_HOME/.claude/hooks" \
+        "$CASE_HOME/.codex/hooks" \
+        "$compute_checkout/.codex/hooks" || return 1
+    cp "$REPOSITORY_ROOT/claude/hooks/herdr-agent-state.sh" \
+        "$CASE_REPOSITORY/claude/hooks/herdr-agent-state.sh" || return 1
+    cp "$REPOSITORY_ROOT/claude/settings.json" \
+        "$CASE_HOME/.claude/settings.json" || return 1
+    cp "$compute_source/.codex/hooks/herdr-agent-state.sh" \
+        "$compute_checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+    cp "$compute_source/.codex/hooks.json" \
+        "$compute_checkout/.codex/hooks.json" || return 1
+    chmod 0755 \
+        "$CASE_REPOSITORY/claude/hooks/herdr-agent-state.sh" \
+        "$compute_checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+    ln -s "$CASE_REPOSITORY/claude/hooks/herdr-agent-state.sh" \
+        "$CASE_HOME/.claude/hooks/herdr-agent-state.sh" || return 1
+    ln -s "$compute_checkout/.codex/hooks/herdr-agent-state.sh" \
+        "$CASE_HOME/.codex/hooks/herdr-agent-state.sh" || return 1
+    ln -s "$compute_checkout/.codex/hooks/herdr-agent-state.sh" \
+        "$CASE_HOME/.codex/herdr-agent-state.sh" || return 1
+    ln -s "$compute_checkout/.codex/hooks.json" \
+        "$CASE_HOME/.codex/hooks.json" || return 1
+}
+
+mutate_herdr_validation_fixture() {
+    local scenario="$1"
+    local claude_source="$CASE_REPOSITORY/claude/hooks/herdr-agent-state.sh"
+    local codex_source="$CASE_HOME/compute-ai-skills/.codex/hooks/herdr-agent-state.sh"
+    local claude_settings="$CASE_HOME/.claude/settings.json"
+    local codex_hooks="$CASE_HOME/compute-ai-skills/.codex/hooks.json"
+    local temporary="$CASE_ROOT/herdr-validation-mutation.json"
+    case "$scenario" in
+        claude-wrong-source)
+            cp "$claude_source" "$CASE_ROOT/wrong-claude-hook.sh" || return 1
+            rm -f -- "$CASE_HOME/.claude/hooks/herdr-agent-state.sh" || return 1
+            ln -s "$CASE_ROOT/wrong-claude-hook.sh" \
+                "$CASE_HOME/.claude/hooks/herdr-agent-state.sh"
+            ;;
+        codex-wrong-source)
+            cp "$codex_source" "$CASE_ROOT/wrong-codex-hook.sh" || return 1
+            rm -f -- "$CASE_HOME/.codex/herdr-agent-state.sh" || return 1
+            ln -s "$CASE_ROOT/wrong-codex-hook.sh" \
+                "$CASE_HOME/.codex/herdr-agent-state.sh"
+            ;;
+        claude-wrong-id)
+            sed -i 's/^# HERDR_INTEGRATION_ID=claude$/# HERDR_INTEGRATION_ID=wrong/' \
+                "$claude_source"
+            ;;
+        codex-wrong-id)
+            sed -i 's/^# HERDR_INTEGRATION_ID=codex$/# HERDR_INTEGRATION_ID=wrong/' \
+                "$codex_source"
+            ;;
+        claude-zero-version)
+            sed -i 's/^# HERDR_INTEGRATION_VERSION=[0-9][0-9]*$/# HERDR_INTEGRATION_VERSION=0/' \
+                "$claude_source"
+            ;;
+        codex-zero-version)
+            sed -i 's/^# HERDR_INTEGRATION_VERSION=[0-9][0-9]*$/# HERDR_INTEGRATION_VERSION=0/' \
+                "$codex_source"
+            ;;
+        claude-duplicate-version)
+            printf '%s\n' '# HERDR_INTEGRATION_VERSION=99' >> "$claude_source"
+            ;;
+        codex-duplicate-version)
+            printf '%s\n' '# HERDR_INTEGRATION_VERSION=99' >> "$codex_source"
+            ;;
+        claude-non-executable)
+            chmod 0644 "$claude_source"
+            ;;
+        codex-non-executable)
+            chmod 0644 "$codex_source"
+            ;;
+        claude-malformed-session)
+            printf '{\n' > "$claude_settings"
+            ;;
+        codex-malformed-session)
+            printf '{\n' > "$codex_hooks"
+            ;;
+        claude-duplicate-session)
+            jq '.hooks.SessionStart += [.hooks.SessionStart[-1]]' \
+                "$claude_settings" > "$temporary" || return 1
+            mv -fT -- "$temporary" "$claude_settings"
+            ;;
+        codex-duplicate-session)
+            jq '.hooks.SessionStart += [.hooks.SessionStart[-1]]' \
+                "$codex_hooks" > "$temporary" || return 1
+            mv -fT -- "$temporary" "$codex_hooks"
+            ;;
+        claude-shadow-session)
+            jq --arg command 'bash "$HOME/.claude/hooks/herdr-agent-state.sh" session' '
+                .hooks.SessionStart += [{
+                    matcher: "*",
+                    hooks: [{type: "command", command: $command, timeout: 11}]
+                }]
+            ' "$claude_settings" > "$temporary" || return 1
+            mv -fT -- "$temporary" "$claude_settings"
+            ;;
+        codex-shadow-session)
+            jq --arg command 'bash "$HOME/.codex/herdr-agent-state.sh" session' '
+                .hooks.SessionStart += [{
+                    hooks: [{
+                        type: "command",
+                        command: $command,
+                        timeout: 10,
+                        statusMessage: "Shadow Herdr invocation"
+                    }]
+                }]
+            ' "$codex_hooks" > "$temporary" || return 1
+            mv -fT -- "$temporary" "$codex_hooks"
+            ;;
+        claude-multiple-documents)
+            cp "$claude_settings" "$temporary" || return 1
+            printf '%s\n' '{}' > "$claude_settings" || return 1
+            sed -n 'p' "$temporary" >> "$claude_settings"
+            ;;
+        codex-multiple-documents)
+            cp "$codex_hooks" "$temporary" || return 1
+            printf '%s\n' '{}' > "$codex_hooks" || return 1
+            sed -n 'p' "$temporary" >> "$codex_hooks"
+            ;;
+        claude-duplicate-session-key)
+            printf '%s\n' \
+                '{"hooks":{"SessionStart":[],"SessionStart":[{"matcher":"*","hooks":[{"type":"command","command":"bash \"$HOME/.claude/hooks/herdr-agent-state.sh\" session","timeout":10}]}]}}' \
+                > "$claude_settings"
+            ;;
+        codex-duplicate-session-key)
+            printf '%s\n' \
+                '{"hooks":{"SessionStart":[],"SessionStart":[{"hooks":[{"type":"command","command":"bash \"$HOME/.codex/herdr-agent-state.sh\" session","timeout":10}]}]}}' \
+                > "$codex_hooks"
+            ;;
+        *) return 2 ;;
+    esac
+}
+
 run_direct_new_state_rollback() {
     local confirmed_name="${1:-}" confirmed_record="${2:-}" mv_mode="${3:-normal}"
     env -i \
@@ -1206,6 +1585,9 @@ run_main_inventory() {
             install_starship() { return 0; }
             install_zoxide() { return 0; }
             install_release_binary() { return 0; }
+            install_herdr() {
+                printf "install_herdr\n" >> "$INSTALL_INVENTORY_LOG"
+            }
             install_tmux() { return 0; }
             install_neovim() { return 0; }
             link_dotfiles() { return 0; }
@@ -1243,6 +1625,23 @@ require_equal() {
         printf 'assertion failed: %s (expected %s, got %s)\n' \
             "$description" "$expected" "$actual" >&2
         return 1
+    fi
+}
+
+require_herdr_installer_pipeline() {
+    local marker_expected="$1"
+    require_equal "official installer invokes POSIX sh with no arguments" \
+        sh "$(< "$CASE_ROOT/herdr-installer-sh.log")" || return 1
+    require_equal "POSIX sh consumes the exact fetched installer bytes" \
+        "$(file_sha256 "$CASE_ROOT/herdr-installer-bytes.sh")" \
+        "$(file_sha256 "$CASE_ROOT/herdr-installer-sh-input.sh")" || return 1
+    if [[ "$marker_expected" == 1 ]]; then
+        require_equal "the fetched installer is executed by POSIX sh" \
+            posix-sh-consumed \
+            "$(tr -d '\n' < "$CASE_ROOT/herdr-posix-sh.marker")" || return 1
+    else
+        require "a non-success installer does not emit the POSIX sh marker" \
+            test ! -e "$CASE_ROOT/herdr-posix-sh.marker" || return 1
     fi
 }
 
@@ -1620,14 +2019,14 @@ test_final_validation_checks_definitions_without_claude_calls() {
     local state missing_command
     local -a required_commands=(
         git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
-        yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux tmux nvim
+        yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux herdr tmux nvim
     )
     new_case || return 1
     state="$CASE_HOME/.claude.json"
     cp "$CASE_REPOSITORY/claude/mcp-servers.json" "$state"
-    mkdir -p "$CASE_HOME/.tmux/plugins/tmux" "$CASE_HOME/.codex"
+    mkdir -p "$CASE_HOME/.tmux/plugins/tmux"
     : > "$CASE_HOME/.tmux/plugins/tmux/catppuccin.tmux"
-    ln -s "$CASE_ROOT/hooks.json" "$CASE_HOME/.codex/hooks.json"
+    prepare_herdr_validation_fixture || return 1
 
     run_final_validation
     require_equal "final validation command completes" 0 "$CASE_STATUS" || return 1
@@ -1663,9 +2062,57 @@ test_final_validation_checks_definitions_without_claude_calls() {
     require_no_external_commands || return 1
 }
 
+test_final_validation_rejects_invalid_herdr_integrations() {
+    local row scenario expected_failure failure_count
+    local -a rows=(
+        'claude-wrong-source|Claude HERDR hook link missing or invalid'
+        'codex-wrong-source|Codex HERDR runtime hook link missing or invalid'
+        'claude-wrong-id|Claude HERDR hook link missing or invalid'
+        'codex-wrong-id|Codex HERDR hook-tree link missing or invalid'
+        'claude-zero-version|Claude HERDR hook link missing or invalid'
+        'codex-zero-version|Codex HERDR hook-tree link missing or invalid'
+        'claude-duplicate-version|Claude HERDR hook link missing or invalid'
+        'codex-duplicate-version|Codex HERDR hook-tree link missing or invalid'
+        'claude-non-executable|Claude HERDR hook link missing or invalid'
+        'codex-non-executable|Codex HERDR hook-tree link missing or invalid'
+        'claude-malformed-session|Claude HERDR SessionStart hook missing or invalid'
+        'codex-malformed-session|Codex HERDR SessionStart hook missing or invalid'
+        'claude-duplicate-session|Claude HERDR SessionStart hook missing or invalid'
+        'codex-duplicate-session|Codex HERDR SessionStart hook missing or invalid'
+        'claude-shadow-session|Claude HERDR SessionStart hook missing or invalid'
+        'codex-shadow-session|Codex HERDR SessionStart hook missing or invalid'
+        'claude-multiple-documents|Claude HERDR SessionStart hook missing or invalid'
+        'codex-multiple-documents|Codex HERDR SessionStart hook missing or invalid'
+        'claude-duplicate-session-key|Claude HERDR SessionStart hook missing or invalid'
+        'codex-duplicate-session-key|Codex HERDR SessionStart hook missing or invalid'
+    )
+    for row in "${rows[@]}"; do
+        IFS='|' read -r scenario expected_failure <<< "$row"
+        new_case || return 1
+        cp "$CASE_REPOSITORY/claude/mcp-servers.json" \
+            "$CASE_HOME/.claude.json" || return 1
+        mkdir -p "$CASE_HOME/.tmux/plugins/tmux" || return 1
+        : > "$CASE_HOME/.tmux/plugins/tmux/catppuccin.tmux"
+        prepare_herdr_validation_fixture || return 1
+        mutate_herdr_validation_fixture "$scenario" || return 1
+
+        run_final_validation
+        require "$scenario is rejected by final validation" \
+            test "$CASE_STATUS" -ne 0 || return 1
+        require "$scenario reports the responsible Herdr validation" \
+            grep -Fq -- "$expected_failure" "$CASE_OUTPUT" || return 1
+        failure_count="$(sed -n 's/^FAILURE_COUNT=//p' "$CASE_OUTPUT")"
+        require "$scenario records at least one validation failure" \
+            test "${failure_count:-0}" -ge 1 || return 1
+        require "$scenario validation invokes no Claude command" \
+            test ! -s "$CASE_LOG" || return 1
+        require_no_external_commands || return 1
+    done
+}
+
 test_main_inventory_requires_both_yazi_commands() {
     local expected
-    expected=$'install_cargo_tool eza eza\ninstall_cargo_tool fd-find fd\ninstall_cargo_tool diskus diskus\ninstall_cargo_tool csvlens csvlens\ninstall_cargo_tool yazi-fm yazi\ninstall_cargo_tool yazi-cli ya'
+    expected=$'install_cargo_tool eza eza\ninstall_cargo_tool fd-find fd\ninstall_cargo_tool diskus diskus\ninstall_cargo_tool csvlens csvlens\ninstall_cargo_tool yazi-fm yazi\ninstall_cargo_tool yazi-cli ya\ninstall_herdr'
     new_case || return 1
     run_main_inventory
     require_equal "inventory-only main execution succeeds" 0 "$CASE_STATUS" || return 1
@@ -1676,6 +2123,9 @@ test_main_inventory_requires_both_yazi_commands() {
             "$CASE_ROOT/install-inventory.log")" || return 1
     require_equal "yazi-cli maps to the required ya executable" 1 \
         "$(grep -c '^install_cargo_tool yazi-cli ya$' \
+            "$CASE_ROOT/install-inventory.log")" || return 1
+    require_equal "main invokes the guarded Herdr installer once" 1 \
+        "$(grep -c '^install_herdr$' \
             "$CASE_ROOT/install-inventory.log")" || return 1
     require_no_external_commands || return 1
 }
@@ -1901,6 +2351,9 @@ test_link_dotfiles_backup_and_claude_state_contract() {
     require "dangling link is replaced by the intended link" \
         test "$(readlink "$dangling_target")" == \
             "$CASE_REPOSITORY/config/starship.toml" || return 1
+    require "Claude Herdr hook is linked from the tracked source" \
+        test "$(readlink "$CASE_HOME/.claude/hooks/herdr-agent-state.sh")" == \
+            "$CASE_REPOSITORY/claude/hooks/herdr-agent-state.sh" || return 1
 
     backup_count="$(find "$CASE_HOME" -mindepth 1 -maxdepth 1 -type d \
         -name '.dotfiles-backup-*' | wc -l)"
@@ -2124,6 +2577,100 @@ test_release_binary_member_cardinality() {
     done
 }
 
+test_herdr_install_guard_and_idempotence() {
+    new_case || return 1
+    run_herdr_install_fixture working unused
+    require_equal "working Herdr is retained" 0 "$CASE_STATUS" || return 1
+    require "working Herdr skips the installer request" \
+        test ! -s "$CASE_ROOT/herdr-curl.log" || return 1
+    require "working Herdr never starts an installer shell" \
+        test ! -s "$CASE_ROOT/herdr-installer-sh.log" || return 1
+    require_equal "working Herdr uses one bounded version probe" \
+        "timeout 10 $CASE_HOME/.local/bin/herdr --version" \
+        "$(< "$CASE_ROOT/herdr-timeout.log")" || return 1
+    require_equal "working Herdr receives the primary version flag" \
+        'initial --version' "$(< "$CASE_ROOT/herdr-version.log")" || return 1
+    require_no_external_commands || return 1
+
+    new_case || return 1
+    run_herdr_install_fixture missing success
+    require_equal "missing Herdr installs successfully" 0 "$CASE_STATUS" || return 1
+    require_equal "missing Herdr invokes the exact official curl flow once" \
+        'curl -fsSL https://herdr.dev/install.sh' \
+        "$(< "$CASE_ROOT/herdr-curl.log")" || return 1
+    require "the official installer makes Herdr discoverable and executable" \
+        test -x "$CASE_HOME/.local/bin/herdr" || return 1
+    require_equal "newly installed Herdr passes its bounded post-install probe" \
+        "timeout 10 $CASE_HOME/.local/bin/herdr --version" \
+        "$(< "$CASE_ROOT/herdr-timeout.log")" || return 1
+    require_herdr_installer_pipeline 1 || return 1
+
+    run_herdr_install_fixture preserve unused
+    require_equal "installed Herdr remains usable on a repeated run" \
+        0 "$CASE_STATUS" || return 1
+    require "the repeated run performs no installer request" \
+        test ! -s "$CASE_ROOT/herdr-curl.log" || return 1
+    require "the repeated run never starts an installer shell" \
+        test ! -s "$CASE_ROOT/herdr-installer-sh.log" || return 1
+    require_equal "the repeated run performs one bounded retention probe" \
+        "timeout 10 $CASE_HOME/.local/bin/herdr --version" \
+        "$(< "$CASE_ROOT/herdr-timeout.log")" || return 1
+    require_no_external_commands || return 1
+
+    new_case || return 1
+    run_herdr_install_fixture broken success
+    require_equal "broken Herdr is replaced successfully" 0 "$CASE_STATUS" || return 1
+    require_equal "broken Herdr invokes the exact official curl flow once" \
+        'curl -fsSL https://herdr.dev/install.sh' \
+        "$(< "$CASE_ROOT/herdr-curl.log")" || return 1
+    require_equal "broken Herdr exhausts both bounded probes before replacement" \
+        "timeout 10 $CASE_HOME/.local/bin/herdr --version
+timeout 10 $CASE_HOME/.local/bin/herdr -V
+timeout 10 $CASE_HOME/.local/bin/herdr --version" \
+        "$(< "$CASE_ROOT/herdr-timeout.log")" || return 1
+    require "broken Herdr replacement is diagnosed" \
+        grep -Fq -- 'herdr on PATH cannot complete a version probe' \
+        "$CASE_OUTPUT" || return 1
+    require_herdr_installer_pipeline 1 || return 1
+    require_no_external_commands || return 1
+}
+
+test_herdr_install_failures_are_observable() {
+    local installer_mode
+    local -a installer_modes=(
+        curl-failure
+        installer-shell-failure
+        missing-post-install
+        broken-post-install
+    )
+    for installer_mode in "${installer_modes[@]}"; do
+        new_case || return 1
+        run_herdr_install_fixture missing "$installer_mode"
+        require "$installer_mode makes the Herdr install step fail" \
+            test "$CASE_STATUS" -ne 0 || return 1
+        require_equal "$installer_mode uses the exact official curl flow once" \
+            'curl -fsSL https://herdr.dev/install.sh' \
+            "$(< "$CASE_ROOT/herdr-curl.log")" || return 1
+        if [[ "$installer_mode" == broken-post-install ]]; then
+            require_herdr_installer_pipeline 1 || return 1
+        else
+            require_herdr_installer_pipeline 0 || return 1
+        fi
+        case "$installer_mode" in
+            curl-failure|installer-shell-failure|missing-post-install)
+                require "$installer_mode leaves no discoverable Herdr command" \
+                    test ! -e "$CASE_HOME/.local/bin/herdr" || return 1
+                ;;
+            broken-post-install)
+                require "$installer_mode installs a command that fails both probes" \
+                    grep -Fq -- 'installed -V' \
+                    "$CASE_ROOT/herdr-version.log" || return 1
+                ;;
+        esac
+        require_no_external_commands || return 1
+    done
+}
+
 test_secret_roundtrip_migration_permissions_and_redaction() {
     local secret_value gh_secret claude_secret gh_hash claude_hash backup backup_root
     local preset_backup migrated_key
@@ -2254,6 +2801,12 @@ test_compute_skills_checkout_states() {
         require "$mode links Codex hooks leaf-by-leaf" \
             test "$(readlink "$CASE_HOME/.codex/hooks/shared-codex-hook")" == \
                 "$checkout/.codex/hooks/shared-codex-hook" || return 1
+        require "$mode links the Codex Herdr hook in the hooks tree" \
+            test "$(readlink "$CASE_HOME/.codex/hooks/herdr-agent-state.sh")" == \
+                "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+        require "$mode links the Codex Herdr runtime root alias" \
+            test "$(readlink "$CASE_HOME/.codex/herdr-agent-state.sh")" == \
+                "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
         require "$mode links Codex hooks.json" \
             test "$(readlink "$CASE_HOME/.codex/hooks.json")" == \
                 "$checkout/.codex/hooks.json" || return 1
@@ -2324,11 +2877,47 @@ test_compute_skills_checkout_states() {
     require "successful clone links cloned Codex hooks" \
         test "$(readlink "$CASE_HOME/.codex/hooks/cloned-codex-hook")" == \
             "$checkout/.codex/hooks/cloned-codex-hook" || return 1
+    require "successful clone links the Codex Herdr hook in the hooks tree" \
+        test "$(readlink "$CASE_HOME/.codex/hooks/herdr-agent-state.sh")" == \
+            "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+    require "successful clone links the Codex Herdr runtime root alias" \
+        test "$(readlink "$CASE_HOME/.codex/herdr-agent-state.sh")" == \
+            "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
     require "successful clone links cloned hooks.json" \
         test "$(readlink "$CASE_HOME/.codex/hooks.json")" == \
             "$checkout/.codex/hooks.json" || return 1
     require "successful clone creates no Cursor activation" \
         test ! -e "$CASE_HOME/.cursor" || return 1
+    require_no_external_commands || return 1
+
+    new_case || return 1
+    prepare_compute_checkout_fixture || return 1
+    checkout="$CASE_HOME/compute-ai-skills"
+    rm -f -- "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+    run_compute_skills_fixture dirty
+    require "a stale compute checkout without the Codex Herdr hook is rejected" \
+        test "$CASE_STATUS" -ne 0 || return 1
+    require "the stale checkout error names the required missing hook" \
+        grep -Fq -- \
+            "required compute-ai-skills HERDR hook missing: $checkout/.codex/hooks/herdr-agent-state.sh" \
+            "$CASE_OUTPUT" || return 1
+    require "stale checkout failure occurs before runtime links are created" \
+        test ! -e "$CASE_HOME/.codex/hooks" || return 1
+    require_no_external_commands || return 1
+
+    new_case || return 1
+    prepare_compute_checkout_fixture || return 1
+    checkout="$CASE_HOME/compute-ai-skills"
+    chmod 0644 "$checkout/.codex/hooks/herdr-agent-state.sh" || return 1
+    run_compute_skills_fixture dirty
+    require "a compute checkout with a non-executable Codex Herdr hook is rejected" \
+        test "$CASE_STATUS" -ne 0 || return 1
+    require "the non-executable checkout error names the required hook" \
+        grep -Fq -- \
+            "required compute-ai-skills HERDR hook is not executable: $checkout/.codex/hooks/herdr-agent-state.sh" \
+            "$CASE_OUTPUT" || return 1
+    require "non-executable hook failure occurs before runtime links are created" \
+        test ! -e "$CASE_HOME/.codex/hooks" || return 1
     require_no_external_commands || return 1
 
     new_case || return 1
@@ -2341,6 +2930,134 @@ test_compute_skills_checkout_states() {
     require "failed clone leaves no partial checkout" test ! -e "$checkout" || return 1
     require "failed clone creates no runtime links" \
         test ! -e "$CASE_HOME/.claude/skills" || return 1
+    require_no_external_commands || return 1
+}
+
+test_herdr_integration_configuration_and_reporting() {
+    local compute_source="${COMPUTE_SKILLS_SOURCE_ROOT:-$REPOSITORY_ROOT/../compute-ai-skills}"
+    local claude_hook="$REPOSITORY_ROOT/claude/hooks/herdr-agent-state.sh"
+    local codex_hook="$compute_source/.codex/hooks/herdr-agent-state.sh"
+    local codex_hooks="$compute_source/.codex/hooks.json"
+    local row agent hook no_op_status
+    local -a hook_rows=(
+        "claude|$claude_hook"
+        "codex|$codex_hook"
+    )
+    [[ -f "$codex_hook" && -f "$codex_hooks" ]] || {
+        printf 'assertion failed: compute-ai-skills Herdr sources are unavailable at %s\n' \
+            "$compute_source" >&2
+        return 1
+    }
+    sh -n "$claude_hook" "$codex_hook" || return 1
+    require_equal "Claude Herdr hook retains the pinned v0.7.5 bytes" \
+        ffd5a76b7c62f5313040fc1e98fa010ff19a7aa85dd9fe6f325b9729d5f01b46 \
+        "$(file_sha256 "$claude_hook")" || return 1
+    require_equal "Codex Herdr hook retains the pinned v0.7.5 bytes" \
+        2ac8115359ff849cd61e450574b371f6732780a63a07ad87c00448db5c20362d \
+        "$(file_sha256 "$codex_hook")" || return 1
+    require_equal "Claude hook has exactly one Claude integration ID" 1 \
+        "$(grep -Fxc '# HERDR_INTEGRATION_ID=claude' "$claude_hook")" || return 1
+    require_equal "Claude hook has exactly one positive integration version" 1 \
+        "$(grep -Ec '^# HERDR_INTEGRATION_VERSION=[1-9][0-9]*$' "$claude_hook")" || return 1
+    require_equal "Codex hook has exactly one Codex integration ID" 1 \
+        "$(grep -Fxc '# HERDR_INTEGRATION_ID=codex' "$codex_hook")" || return 1
+    require_equal "Codex hook has exactly one positive integration version" 1 \
+        "$(grep -Ec '^# HERDR_INTEGRATION_VERSION=[1-9][0-9]*$' "$codex_hook")" || return 1
+    require "Claude declares exactly one matcher-wide Herdr SessionStart hook" \
+        jq -e --arg command 'bash "$HOME/.claude/hooks/herdr-agent-state.sh" session' '
+            ([.hooks.SessionStart[] | select(. == {
+                matcher: "*",
+                hooks: [{type: "command", command: $command, timeout: 10}]
+            })] | length) == 1 and
+            ([.hooks.SessionStart[].hooks[] | select(.command == $command)] | length) == 1
+        ' "$REPOSITORY_ROOT/claude/settings.json" >/dev/null || return 1
+    require "Codex declares exactly one matcher-free Herdr SessionStart hook" \
+        jq -e --arg command 'bash "$HOME/.codex/herdr-agent-state.sh" session' '
+            ([.hooks.SessionStart[] | select(. == {
+                hooks: [{type: "command", command: $command, timeout: 10}]
+            })] | length) == 1 and
+            ([.hooks.SessionStart[].hooks[] | select(.command == $command)] | length) == 1
+        ' "$codex_hooks" >/dev/null || return 1
+    require "Claude preserves the pre-existing venv SessionStart group exactly" \
+        jq -e --arg command '~/.claude/hooks/rocprofiler-compute-venv.sh' '
+            ([.hooks.SessionStart[] | select(. == {
+                hooks: [{type: "command", command: $command}]
+            })] | length) == 1 and
+            ([.hooks.SessionStart[].hooks[] | select(.command == $command)] | length) == 1
+        ' "$REPOSITORY_ROOT/claude/settings.json" >/dev/null || return 1
+    require "Codex preserves the pre-existing venv SessionStart group exactly" \
+        jq -e \
+            --arg command '$HOME/.codex/hooks/rocprofiler-compute-venv.sh' \
+            --arg status_message 'Checking rocprofiler-compute venv' '
+            ([.hooks.SessionStart[] | select(. == {
+                hooks: [{
+                    type: "command",
+                    command: $command,
+                    statusMessage: $status_message
+                }]
+            })] | length) == 1 and
+            ([.hooks.SessionStart[].hooks[] | select(.command == $command)] | length) == 1
+        ' "$codex_hooks" >/dev/null || return 1
+    require "Codex hooks are enabled in the parsed TOML configuration" \
+        python3 - "$REPOSITORY_ROOT/codex/config.toml" <<'PY' || return 1
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    configuration = tomllib.load(handle)
+raise SystemExit(0 if configuration.get("features", {}).get("hooks") is True else 1)
+PY
+    require "Claude retains tmux teammate mode" \
+        jq -e '.env.teammateMode == "tmux"' \
+        "$REPOSITORY_ROOT/claude/settings.json" >/dev/null || return 1
+
+    new_case || return 1
+    for row in "${hook_rows[@]}"; do
+        IFS='|' read -r agent hook <<< "$row"
+        no_op_status=0
+        printf '%s\n' \
+            "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"$agent-outside\"}" |
+            env -i \
+                HOME="$CASE_HOME" \
+                PATH=/usr/bin:/bin \
+                TMPDIR="$CASE_TMP" \
+                "$hook" session > "$CASE_ROOT/herdr-$agent-outside.log" 2>&1 || \
+            no_op_status=$?
+        require_equal "$agent hook is a successful no-op outside Herdr" \
+            0 "$no_op_status" || return 1
+        require "$agent outside-Herdr hook leaves no socket or request artifact" \
+            test -z "$(find "$CASE_ROOT" -maxdepth 1 \
+                \( -name "herdr-$agent.sock" -o -name "herdr-$agent-request.json" \) \
+                -print -quit)" || return 1
+
+        run_herdr_hook_socket_fixture "$hook" "$agent" || return 1
+        require_equal "$agent hook and socket fixture both succeed" \
+            $'HOOK_STATUS=0\nSERVER_STATUS=0' \
+            "$(< "$CASE_ROOT/herdr-$agent-status.log")" || return 1
+        require "$agent hook reports valid SessionStart identity to Herdr" \
+            jq -e --arg agent "$agent" --arg session "$agent-session" '
+                .method == "pane.report_agent_session" and
+                .params.pane_id == "%42" and
+                .params.source == ("herdr:" + $agent) and
+                .params.agent == $agent and
+                .params.agent_session_id == $session and
+                .params.session_start_source == "startup" and
+                (.params.seq | type) == "number"
+            ' "$CASE_ROOT/herdr-$agent-request.json" >/dev/null || return 1
+        if [[ "$agent" == claude ]]; then
+            require "Claude reports its transcript as the agent session path" \
+                jq -e --arg path "$CASE_ROOT/claude-transcript.jsonl" \
+                '.params.agent_session_path == $path' \
+                "$CASE_ROOT/herdr-claude-request.json" >/dev/null || return 1
+        else
+            require "Codex does not invent an agent session path" \
+                jq -e '.params | has("agent_session_path") | not' \
+                "$CASE_ROOT/herdr-codex-request.json" >/dev/null || return 1
+        fi
+    done
+    require "hook temporary input files are cleaned up" \
+        test -z "$(find "$CASE_TMP" -maxdepth 1 -name 'herdr-*-hook.*' -print -quit)" || \
+        return 1
     require_no_external_commands || return 1
 }
 
@@ -3020,12 +3737,12 @@ container_expected_validation_have_log() {
     local command_name
     local -a required_commands=(
         git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
-        yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux tmux nvim
+        yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux herdr tmux nvim
     )
     for command_name in "${required_commands[@]}"; do
         printf '%s\n' "$command_name"
     done
-    printf '%s\n' tmux nvim fzf rg btop duf gh gitmux
+    printf '%s\n' tmux nvim fzf rg btop duf gh gitmux herdr
 }
 
 container_inner_main() {
@@ -3100,6 +3817,10 @@ container_inner_main() {
     install_release_binary() {
         container_record_install_call install_release_binary "$@"
         present "$2"
+    }
+    install_herdr() {
+        container_record_install_call install_herdr "$@"
+        present herdr
     }
     seed_secrets() {
         container_record_install_call seed_secrets "$@"
@@ -3195,6 +3916,8 @@ container_inner_main() {
         "$(grep -c '^install_cargo_tool yazi-fm yazi$' "$CONTAINER_INSTALL_CALL_LOG")" || return 1
     require_equal "ya is installed from its required Cargo crate" 1 \
         "$(grep -c '^install_cargo_tool yazi-cli ya$' "$CONTAINER_INSTALL_CALL_LOG")" || return 1
+    require_equal "the container main inventory invokes Herdr installation once" 1 \
+        "$(grep -c '^install_herdr$' "$CONTAINER_INSTALL_CALL_LOG")" || return 1
 
     mkdir -p "$HOME/.tmux/plugins/tmux" "$HOME/.codex" || return 1
     : > "$HOME/.tmux/plugins/tmux/catppuccin.tmux" || return 1
@@ -3210,6 +3933,9 @@ container_inner_main() {
     nvim_version() { printf '0.11.2\n'; }
     binary_version_works() { return 0; }
     claude_mcp_state_is_exact() { return 0; }
+    herdr_hook_is_valid() { return 0; }
+    claude_herdr_session_start_is_exact() { return 0; }
+    codex_herdr_session_start_is_exact() { return 0; }
 
     : > "$VALIDATION_HAVE_LOG"
     FAILURES=()
@@ -3220,11 +3946,11 @@ container_inner_main() {
     require_equal "real validation checks the exact mandatory command inventory" \
         "$(container_expected_validation_have_log)" \
         "$(< "$VALIDATION_HAVE_LOG")" || return 1
-    for VALIDATION_MISSING in yazi ya; do
+    for VALIDATION_MISSING in yazi ya herdr; do
         : > "$VALIDATION_HAVE_LOG"
         FAILURES=()
         container_original_validate_required_commands >/dev/null 2>&1
-        require_equal "each Yazi executable is independently mandatory" 1 \
+        require_equal "each controlled executable is independently mandatory" 1 \
             "${#FAILURES[@]}" || return 1
         require_equal "the controlled missing command is reported exactly" \
             "required command missing: $VALIDATION_MISSING" "${FAILURES[0]}" || return 1
@@ -3292,7 +4018,10 @@ stage_container_path() {
 
 stage_container_checkout() {
     local destination="$1" path
-    local -a untracked_feature_allowlist=(tests/install_test.sh)
+    local -a untracked_feature_allowlist=(
+        tests/install_test.sh
+        claude/hooks/herdr-agent-state.sh
+    )
     mkdir -p "$destination" || return 1
     while IFS= read -r -d '' path; do
         stage_container_path "$destination" "$path" || return 1
@@ -3300,6 +4029,7 @@ stage_container_checkout() {
     for path in "${untracked_feature_allowlist[@]}"; do
         stage_container_path "$destination" "$path" || return 1
     done
+    find "$destination" -type d -exec chmod 0755 {} + || return 1
     [[ -x "$destination/install.sh" && -x "$destination/tests/install_test.sh" ]] || return 1
     [[ ! -e "$destination/.git" && ! -e "$destination/.claude.json" &&
        ! -e "$destination/secrets.env" && ! -e "$destination/secrets" ]]
@@ -3424,6 +4154,9 @@ dispatch_container_worker_failure() {
 verify_container_worker_failure() {
     local status=0
     dispatch_container_worker_failure || status=$?
+    if (( status != 1 )) && [[ -f "$CONTAINER_FAILURE_OUTPUT" ]]; then
+        sed -n '1,160p' "$CONTAINER_FAILURE_OUTPUT" >&2
+    fi
     require_equal "failed container worker status reaches the host dispatcher" \
         1 "$status" || return 1
     require "failed container worker reports the injected main failure" \
@@ -3580,7 +4313,7 @@ test_forged_container_inner_is_rejected_before_mutation() {
 
 test_staging_rejects_forbidden_paths_before_source_read() {
     local root forbidden_path repository destination source_path poison_marker output status
-    local git_log
+    local git_log restrictive_destination
     local index=0
     local -a forbidden_paths=(
         .claude.json
@@ -3656,6 +4389,25 @@ test_staging_rejects_forbidden_paths_before_source_read() {
         test ! -e "$destination/secrets" || return 1
     require "staging never enumerates every untracked file" \
         test -z "$(grep -- '--others' "$git_log" || true)" || return 1
+
+    restrictive_destination="$root/restrictive-umask-destination"
+    (
+        umask 0077
+        REPOSITORY_ROOT="$repository"
+        git() {
+            [[ "$*" == *'ls-files -z --cached'* ]] || return 98
+            printf '%s\0%s\0' install.sh tracked.txt
+        }
+        stage_container_checkout "$restrictive_destination"
+    ) || return 1
+    require_equal "restrictive-umask staging normalizes the checkout root" 755 \
+        "$(stat -c '%a' "$restrictive_destination")" || return 1
+    require "restrictive-umask staging makes every directory container-traversable" \
+        test -z "$(find "$restrictive_destination" -type d ! -perm 0755 \
+            -print -quit)" || return 1
+    require "restrictive-umask staging preserves executable entrypoints" \
+        test -x "$restrictive_destination/install.sh" && \
+        test -x "$restrictive_destination/tests/install_test.sh" || return 1
 }
 
 test_container_dispatch_without_host_mutation() {
@@ -4085,6 +4837,7 @@ run_hermetic_suite() {
     run_test "ambiguous existing state is preserved during rollback" test_ambiguous_existing_state_is_not_overwritten_during_rollback
     run_test "failure bookkeeping continues with nonzero final status" test_failure_bookkeeping_continues_and_is_nonzero
     run_test "final validation checks definitions without Claude calls" test_final_validation_checks_definitions_without_claude_calls
+    run_test "final validation rejects invalid Herdr integrations" test_final_validation_rejects_invalid_herdr_integrations
     run_test "main inventory requires yazi and ya" test_main_inventory_requires_both_yazi_commands
     run_test "supported distro package flows are exact" test_supported_distro_package_flows
     run_test "preflight rejects unsupported hosts before mutation" test_preflight_rejects_before_mutation
@@ -4092,8 +4845,11 @@ run_hermetic_suite() {
     run_test "dotfile links preserve conflicts and never link claude.json" test_link_dotfiles_backup_and_claude_state_contract
     run_test "download selection and archives fail closed" test_download_selection_checksums_and_archive_safety
     run_test "release binaries require exactly one expected executable" test_release_binary_member_cardinality
+    run_test "Herdr installation is guarded and idempotent" test_herdr_install_guard_and_idempotence
+    run_test "Herdr installer failures are observable" test_herdr_install_failures_are_observable
     run_test "secrets migrate privately without log leakage" test_secret_roundtrip_migration_permissions_and_redaction
     run_test "compute skills checkout states are preserved safely" test_compute_skills_checkout_states
+    run_test "Herdr integrations are exact and report session identity" test_herdr_integration_configuration_and_reporting
     run_test "repository syntax and shell discovery are valid" test_repository_static_and_shell_discovery_contract
     run_test "malformed and nonregular state is untouched" test_malformed_and_nonregular_state_is_untouched
     run_test "duplicate JSON survives destructive rollback proof" test_duplicate_json_is_preserved_during_destructive_proof

@@ -30,10 +30,10 @@ version 9 and newer; on RHEL it enables the matching CodeReady Builder
 repository. Every RHEL-family path also installs EPEL. See the complete
 mandatory package and command inventory in [`TOOLS.md`](TOOLS.md).
 
-One run installs Rust, Go, Node/npm, uv, the required CLI/TUI tools, tmux and
-its plugins, and the Claude/Codex tooling before linking configuration and
-validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory and
-are installed and validated separately.
+One run installs Rust, Go, Node/npm, uv, the required CLI/TUI tools (including
+Herdr), tmux and its plugins, and the Claude/Codex tooling before linking
+configuration and validating the result. Both Yazi commands, `yazi` and `ya`,
+are mandatory and are installed and validated separately.
 
 Claude and Codex skills/hooks require `~/compute-ai-skills`. If it is absent,
 the installer clones the expected `abchoudh-amd/compute-ai-skills` repository.
@@ -41,14 +41,24 @@ It fast-forwards an existing clean `main` checkout, but preserves a dirty or
 non-`main` checkout with a warning. A checkout with an unexpected origin is a
 required failure.
 
+Herdr is also required. A `herdr` command on `PATH` that completes a version
+probe is retained. If it is missing or broken, the installer runs the official
+installer exactly as follows and then requires the resulting command to be on
+`PATH` and pass the same probe:
+
+```bash
+curl -fsSL https://herdr.dev/install.sh | sh
+```
+
 Independent phases continue after a failure so the final summary can report
 everything that needs attention. A required failure produces a nonzero exit;
 fix the reported issue and run `./install.sh` again.
 
-After a successful run, review the installed Codex hooks with `/hooks`, restart
-Claude Code and Codex, and open a new shell so the installed paths and shell
-initializers are active. Authentication remains a manual follow-up where the
-summary requests it.
+After a successful run, review the installed Codex hooks with `/hooks`, complete
+any trust prompt Codex presents, restart Claude Code and Codex, and open a new
+shell so the installed paths and shell initializers are active. The installer
+enables Codex hooks but does not update trusted-hook hashes. Authentication
+remains a manual follow-up where the summary requests it.
 
 ## What's tracked
 
@@ -61,6 +71,28 @@ summary requests it.
 | Codex           | `codex/config.toml` (key read from `$LLM_GATEWAY_KEY` at runtime)     |
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/btop`                           |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
+
+## Herdr agent integration
+
+This repository owns the tracked Claude hook
+[`claude/hooks/herdr-agent-state.sh`](claude/hooks/herdr-agent-state.sh), which
+the installer links to `~/.claude/hooks/herdr-agent-state.sh`. It is vendored
+from Herdr v0.7.5 with integration ID `claude` and integration version `7`.
+Claude's tracked settings invoke it on `SessionStart`; restart Claude Code
+after installation so the new hook configuration is loaded.
+
+The tracked Codex configuration enables hook support, while
+`~/compute-ai-skills` owns the corresponding v0.7.5 Codex hook (integration ID
+`codex`, version `6`) and `hooks.json`. Inside a Herdr-managed pane, these hooks
+report the native Claude or Codex session identity to Herdr's local socket. They
+exit quietly outside that environment and do not report activity transitions,
+so Herdr continues to derive agent status from pane output. Claude's
+`teammateMode` remains `tmux`, and the Herdr integration does not replace or
+change the tracked tmux configuration.
+
+> **Warning:** Do not run `herdr integration install` against these managed
+> integrations. The live hook paths are symlinks, so that command can rewrite
+> the tracked hook targets. Update the vendored assets deliberately instead.
 
 ## Reruns, backups, and recovery
 

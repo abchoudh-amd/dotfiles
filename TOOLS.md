@@ -97,12 +97,19 @@ independently.
 | `duf` | Latest [muesli/duf](https://github.com/muesli/duf) Linux x86_64 release | `~/.local/bin/duf` |
 | `gh` | Latest [cli/cli](https://github.com/cli/cli) Linux amd64 release | `~/.local/bin/gh` |
 | `gitmux` | Latest [arl/gitmux](https://github.com/arl/gitmux) Linux amd64 release | `~/.local/bin/gitmux` |
+| `herdr` | Official [Herdr installer](https://herdr.dev/install.sh), invoked as `curl -fsSL https://herdr.dev/install.sh \| sh` | Upstream installer-selected location on `PATH` |
 
 GitHub release downloads are selected from the latest release metadata. The
 installer verifies a release-provided SHA-256 digest or checksum manifest when
 one is available, rejects unsafe archive members, and verifies that the
 installed executable can answer a version probe. Final validation repeats the
 version probe for `fzf`, `rg`, `btop`, `duf`, `gh`, and `gitmux`.
+
+Herdr has its own guarded path: an existing command that completes a version
+probe is retained without running its installer. A missing or broken command
+causes the exact `curl -fsSL https://herdr.dev/install.sh | sh` pipeline above
+to run, after which the command must be discoverable and complete a version
+probe. Final validation repeats that probe.
 
 ### tmux and Neovim version fallbacks
 
@@ -125,6 +132,37 @@ to `~/.tmux/plugins/tpm` when needed and runs TPM's plugin installer. No manual
 final validation requires
 `~/.tmux/plugins/tmux/catppuccin.tmux`. The configured tmux prefix is
 `Ctrl-s`.
+
+## Herdr agent integrations
+
+The integration assets are vendored from Herdr v0.7.5 rather than generated at
+install time:
+
+- Dotfiles owns `claude/hooks/herdr-agent-state.sh` (integration ID `claude`,
+  version `7`) and links it to `~/.claude/hooks/herdr-agent-state.sh`.
+  `claude/settings.json` contains exactly one matcher-`*`, timeout-10
+  `SessionStart` invocation of
+  `bash "$HOME/.claude/hooks/herdr-agent-state.sh" session`.
+- `~/compute-ai-skills` owns `.codex/hooks/herdr-agent-state.sh` (integration ID
+  `codex`, version `6`) and the Codex `hooks.json`. The installer links the hook
+  into `~/.codex/hooks/` and also at `~/.codex/herdr-agent-state.sh`, the path
+  used by its matcher-free, timeout-10 `SessionStart` entry. The tracked Codex
+  config enables `[features] hooks = true`.
+
+The hooks report native session identity to Herdr's local Unix socket only when
+Herdr has supplied its pane environment (`HERDR_ENV`, `HERDR_SOCKET_PATH`, and
+`HERDR_PANE_ID`); otherwise they exit successfully without reporting. They do
+not publish activity-state transitions, so Herdr's agent status remains derived
+from pane output. Claude's `teammateMode = "tmux"` and the existing tmux setup
+continue unchanged.
+
+Restart Claude Code and Codex after installation. In Codex, inspect `/hooks`
+and complete any trust prompt it presents; installation enables hook support
+but does not update trusted-hook hashes.
+
+> **Warning:** Do not run `herdr integration install` for these integrations.
+> Their live paths are symlinks to tracked files, and the generated installer
+> can rewrite those tracked targets. Update the pinned assets deliberately.
 
 ## Claude MCP configuration
 
@@ -194,11 +232,11 @@ The exact required command set is:
 ```text
 git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
 yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux
-tmux nvim
+herdr tmux nvim
 ```
 
 In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
-0.11.2, executable release-binary version probes, the Catppuccin plugin, the
-Codex hooks link, and exact `jira`/`confluence` user MCP definitions. Any
-missing requirement makes `./install.sh` exit nonzero after printing its full
-summary.
+0.11.2, executable release-binary and Herdr version probes, the Catppuccin
+plugin, the Claude/Codex Herdr hook links and SessionStart entries, the Codex
+hooks link, and exact `jira`/`confluence` user MCP definitions. Any missing
+requirement makes `./install.sh` exit nonzero after printing its full summary.
