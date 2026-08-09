@@ -163,7 +163,7 @@ function y() {
 
 alias du='diskus'
 alias df='duf'
-alias ls='eza --icons=always --all --group-directories-first --oneline'
+alias ls='eza --icons=always --all --group-directories-first --grid'
 alias cd='z'
 alias top='btop'
 alias grep='rg'

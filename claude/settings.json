@@ -1,98 +1,108 @@
 {
+  "alwaysThinkingEnabled": true,
+  "autoCompactEnabled": true,
+  "editorMode": "normal",
+  "enableWorkflows": true,
   "env": {
     "CLAUDE_CODE_EFFORT_LEVEL": "max",
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "teammateMode": "tmux"
   },
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  },
-  "model": "opus",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
         "hooks": [
           {
-            "type": "command",
-            "command": "~/.claude/hooks/slurm-bootstrap.sh"
+            "command": "~/.claude/hooks/slurm-bootstrap.sh",
+            "type": "command"
           }
-        ]
+        ],
+        "matcher": "Bash"
       },
       {
-        "matcher": "Bash",
         "hooks": [
           {
-            "type": "command",
-            "command": "~/.claude/hooks/slurm-mountcheck.sh"
+            "command": "~/.claude/hooks/slurm-mountcheck.sh",
+            "type": "command"
           }
-        ]
+        ],
+        "matcher": "Bash"
       },
       {
-        "matcher": "Bash",
         "hooks": [
           {
-            "type": "command",
-            "command": "~/.claude/hooks/rocprofiler-compute-precommit.sh"
+            "command": "~/.claude/hooks/rocprofiler-compute-precommit.sh",
+            "type": "command"
           }
-        ]
+        ],
+        "matcher": "Bash"
       },
       {
-        "matcher": "ExitPlanMode|Skill",
         "hooks": [
           {
-            "type": "command",
-            "command": "~/.claude/hooks/grill-me-gate.sh"
+            "command": "~/.claude/hooks/grill-me-gate.sh",
+            "type": "command"
           }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/grill-me-reset.sh"
-          }
-        ]
+        ],
+        "matcher": "ExitPlanMode|Skill"
       }
     ],
     "SessionStart": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "~/.claude/hooks/rocprofiler-compute-venv.sh"
+            "command": "~/.claude/hooks/rocprofiler-compute-venv.sh",
+            "type": "command"
           }
         ]
       },
       {
-        "matcher": "*",
         "hooks": [
           {
-            "type": "command",
             "command": "bash \"$HOME/.claude/hooks/herdr-agent-state.sh\" session",
-            "timeout": 10
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      },
+      {
+        "hooks": [
+          {
+            "command": "bash '/home/abchoudh/.claude/hooks/herdr-agent-state.sh' session",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "~/.claude/hooks/grill-me-reset.sh",
+            "type": "command"
           }
         ]
       }
     ]
   },
-  "enableWorkflows": true,
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/claude-statusline"
+  "model": "opus",
+  "permissions": {
+    "defaultMode": "bypassPermissions"
   },
-  "alwaysThinkingEnabled": true,
+  "showThinkingSummaries": false,
+  "skipDangerousModePermissionPrompt": true,
+  "speed": "fast",
+  "statusLine": {
+    "command": "~/.claude/claude-statusline",
+    "type": "command"
+  },
+  "theme": "custom:snazzy-light",
   "ultracode": true,
   "voice": {
     "enabled": true,
     "mode": "tap"
-  },
-  "showThinkingSummaries": false,
-  "skipDangerousModePermissionPrompt": true,
-  "theme": "custom:snazzy-light",
-  "editorMode": "normal",
-  "autoCompactEnabled": true,
-  "speed": "fast"
+  }
 }
