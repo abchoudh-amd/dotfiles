@@ -1209,6 +1209,7 @@ link_dotfiles() {
         "$DOTFILES/config/nvim|$HOME/.config/nvim"
         "$DOTFILES/config/fish|$HOME/.config/fish"
         "$DOTFILES/config/btop/btop.conf|$HOME/.config/btop/btop.conf"
+        "$DOTFILES/config/herdr/config.toml|$HOME/.config/herdr/config.toml"
         "$DOTFILES/claude/settings.json|$HOME/.claude/settings.json"
         "$DOTFILES/claude/statusline.sh|$HOME/.claude/statusline.sh"
         "$DOTFILES/claude/claude-statusline|$HOME/.claude/claude-statusline"

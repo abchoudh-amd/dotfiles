@@ -724,6 +724,7 @@ prepare_link_case_sources() {
         git/gitignore
         config/starship.toml
         config/btop/btop.conf
+        config/herdr/config.toml
         claude/settings.json
         claude/statusline.sh
         claude/claude-statusline
@@ -2310,7 +2311,8 @@ test_package_failures_continue_and_remain_nonzero() {
 
 test_link_dotfiles_backup_and_claude_state_contract() {
     local backup state state_hash correct_target regular_target directory_target
-    local mismatched_target dangling_target backup_root backup_count
+    local mismatched_target dangling_target herdr_config_target herdr_runtime_sentinel
+    local herdr_runtime_hash backup_root backup_count
     new_case || return 1
     prepare_link_case_sources || return 1
     state="$CASE_HOME/.claude.json"
@@ -2324,10 +2326,15 @@ test_link_dotfiles_backup_and_claude_state_contract() {
     directory_target="$CASE_HOME/.gitconfig"
     mismatched_target="$CASE_HOME/.config/git/ignore"
     dangling_target="$CASE_HOME/.config/starship.toml"
+    herdr_config_target="$CASE_HOME/.config/herdr/config.toml"
+    herdr_runtime_sentinel="$CASE_HOME/.config/herdr/session.json"
     mkdir -p "$directory_target" "${mismatched_target%/*}" \
-        "${dangling_target%/*}" || return 1
+        "${dangling_target%/*}" "${herdr_config_target%/*}" || return 1
     printf 'regular conflict\n' > "$regular_target" || return 1
     printf 'directory conflict\n' > "$directory_target/marker" || return 1
+    printf 'legacy Herdr configuration\n' > "$herdr_config_target" || return 1
+    printf '{"mutable":"Herdr runtime state"}\n' > "$herdr_runtime_sentinel" || return 1
+    herdr_runtime_hash="$(file_sha256 "$herdr_runtime_sentinel")"
     printf 'mismatched source\n' > "$CASE_ROOT/mismatched-source" || return 1
     ln -s "$CASE_REPOSITORY/shell/.bashrc" "$correct_target" || return 1
     ln -s "$CASE_ROOT/mismatched-source" "$mismatched_target" || return 1
@@ -2351,6 +2358,15 @@ test_link_dotfiles_backup_and_claude_state_contract() {
     require "dangling link is replaced by the intended link" \
         test "$(readlink "$dangling_target")" == \
             "$CASE_REPOSITORY/config/starship.toml" || return 1
+    require "Herdr configuration conflict is replaced by the intended link" \
+        test "$(readlink "$herdr_config_target")" == \
+            "$CASE_REPOSITORY/config/herdr/config.toml" || return 1
+    require "Herdr runtime sibling remains a regular file" \
+        test -f "$herdr_runtime_sentinel" || return 1
+    require "Herdr runtime sibling is never linked" \
+        test ! -L "$herdr_runtime_sentinel" || return 1
+    require_equal "Herdr runtime sibling content is unchanged" \
+        "$herdr_runtime_hash" "$(file_sha256 "$herdr_runtime_sentinel")" || return 1
     require "Claude Herdr hook is linked from the tracked source" \
         test "$(readlink "$CASE_HOME/.claude/hooks/herdr-agent-state.sh")" == \
             "$CASE_REPOSITORY/claude/hooks/herdr-agent-state.sh" || return 1
@@ -2373,6 +2389,9 @@ test_link_dotfiles_backup_and_claude_state_contract() {
     require_equal "dangling link target is preserved" \
         "$CASE_ROOT/does-not-exist" \
         "$(readlink "$backup_root/.config/starship.toml")" || return 1
+    require_equal "Herdr configuration conflict content is preserved" \
+        'legacy Herdr configuration' \
+        "$(tr -d '\n' < "$backup_root/.config/herdr/config.toml")" || return 1
 
     require "claude.json remains a regular file" \
         test -f "$state" || return 1
@@ -2389,6 +2408,11 @@ test_link_dotfiles_backup_and_claude_state_contract() {
     require_equal "clean link rerun creates no new backup" 1 \
         "$(find "$CASE_HOME" -mindepth 1 -maxdepth 1 -type d \
             -name '.dotfiles-backup-*' | wc -l)" || return 1
+    require "clean rerun keeps the exact Herdr configuration link" \
+        test "$(readlink "$herdr_config_target")" == \
+            "$CASE_REPOSITORY/config/herdr/config.toml" || return 1
+    require_equal "clean rerun still leaves Herdr runtime state unchanged" \
+        "$herdr_runtime_hash" "$(file_sha256 "$herdr_runtime_sentinel")" || return 1
     require_equal "clean rerun still leaves claude.json unchanged" "$state_hash" \
         "$(file_sha256 "$state")" || return 1
     require_no_external_commands || return 1
@@ -3006,6 +3030,14 @@ import tomllib
 with open(sys.argv[1], "rb") as handle:
     configuration = tomllib.load(handle)
 raise SystemExit(0 if configuration.get("features", {}).get("hooks") is True else 1)
+PY
+    require "Herdr configuration parses as TOML" \
+        python3 - "$REPOSITORY_ROOT/config/herdr/config.toml" <<'PY' || return 1
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    tomllib.load(handle)
 PY
     require "Claude retains tmux teammate mode" \
         jq -e '.env.teammateMode == "tmux"' \
@@ -4021,6 +4053,7 @@ stage_container_checkout() {
     local -a untracked_feature_allowlist=(
         tests/install_test.sh
         claude/hooks/herdr-agent-state.sh
+        config/herdr/config.toml
     )
     mkdir -p "$destination" || return 1
     while IFS= read -r -d '' path; do

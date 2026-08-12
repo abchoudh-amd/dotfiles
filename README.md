@@ -67,12 +67,19 @@ remains a manual follow-up where the summary requests it.
 | Shell           | `shell/.bashrc`, `shell/.profile`                                     |
 | Git             | `git/.gitconfig`, `git/gitignore`                                     |
 | Prompt          | `config/starship.toml`                                                |
+| Herdr           | `config/herdr/config.toml` -> `~/.config/herdr/config.toml`           |
 | Claude Code     | settings, status line, theme, and `claude/mcp-servers.json`           |
 | Codex           | `codex/config.toml` (key read from `$LLM_GATEWAY_KEY` at runtime)     |
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/btop`                           |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
 
 ## Herdr agent integration
+
+The installer manages only Herdr's `config.toml`: it links the tracked
+`config/herdr/config.toml` source to `$HOME/.config/herdr/config.toml`. Herdr
+logs, sockets, locks, release notes, and session state remain machine-local;
+they are not tracked or symlinked. The installer does not reload a running
+Herdr server after creating or repairing the link.
 
 This repository owns the tracked Claude hook
 [`claude/hooks/herdr-agent-state.sh`](claude/hooks/herdr-agent-state.sh), which

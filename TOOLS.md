@@ -135,6 +135,12 @@ final validation requires
 
 ## Herdr agent integrations
 
+The installer manages only Herdr's `config.toml`, linking the tracked
+`config/herdr/config.toml` source to `$HOME/.config/herdr/config.toml`. Herdr
+logs, sockets, locks, release notes, and session state remain machine-local
+rather than tracked or symlinked. Creating or repairing this link does not
+reload a running Herdr server.
+
 The integration assets are vendored from Herdr v0.7.5 rather than generated at
 install time:
 
