@@ -13,6 +13,14 @@
       {
         "hooks": [
           {
+            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\"",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
             "command": "~/.claude/hooks/slurm-bootstrap.sh",
             "type": "command"
           }
@@ -65,16 +73,26 @@
           }
         ],
         "matcher": "*"
-      },
+      }
+    ],
+    "SubagentStart": [
       {
         "hooks": [
           {
-            "command": "bash '/home/abchoudh/.claude/hooks/herdr-agent-state.sh' session",
-            "timeout": 10,
+            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\"",
             "type": "command"
           }
-        ],
-        "matcher": "*"
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\"",
+            "type": "command"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
