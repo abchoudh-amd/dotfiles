@@ -90,8 +90,9 @@ independently.
 | Required command | Installation source | Destination |
 | --- | --- | --- |
 | `starship` | Official [Starship installer](https://starship.rs/install.sh) | `~/.local/bin` |
-| `zoxide` | Official [zoxide installer](https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh) | User-local installer default |
+| `zoxide` | Official [zoxide installer](https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh), invoked with `--bin-dir` | `~/.local/bin/zoxide` |
 | `fzf` | Latest [junegunn/fzf](https://github.com/junegunn/fzf) Linux amd64 release | `~/.local/bin/fzf` |
+| `bat` | Latest [sharkdp/bat](https://github.com/sharkdp/bat) x86_64 musl release | `~/.local/bin/bat` |
 | `rg` | Latest [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep) x86_64 musl release | `~/.local/bin/rg` |
 | `btop` | Latest [aristocratos/btop](https://github.com/aristocratos/btop) x86_64 musl release | `~/.local/bin/btop` |
 | `duf` | Latest [muesli/duf](https://github.com/muesli/duf) Linux x86_64 release | `~/.local/bin/duf` |
@@ -103,7 +104,15 @@ GitHub release downloads are selected from the latest release metadata. The
 installer verifies a release-provided SHA-256 digest or checksum manifest when
 one is available, rejects unsafe archive members, and verifies that the
 installed executable can answer a version probe. Final validation repeats the
-version probe for `fzf`, `rg`, `btop`, `duf`, `gh`, and `gitmux`.
+version probe for `fzf`, `bat`, `rg`, `btop`, `duf`, `gh`, and `gitmux`.
+
+`fzf` and `zoxide` carry minimum versions in addition to the presence check,
+because distributions ship binaries too old to work with this configuration:
+`fzf >= 0.48.0` (the first release with the `--bash` integration flag) and
+`zoxide >= 0.9.0` (the first line whose shell init is alias-safe and installs a
+`PROMPT_COMMAND` hook). A command on `PATH` below its minimum is replaced by a
+user-local build in `~/.local/bin`, which wins over the distribution copy
+without removing the system package.
 
 Herdr has its own guarded path: an existing command that completes a version
 probe is retained without running its installer. A missing or broken command
@@ -294,20 +303,13 @@ The exact required command set is:
 
 ```text
 git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
-yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux
+yazi ya glow codex sqlit claude starship zoxide fzf bat rg btop duf gh gitmux
 herdr tmux nvim
 ```
 
 In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
-0.11.2, executable release-binary and Herdr version probes, and the Catppuccin
-plugin. It checks all 14 compute-ai-skills source/destination tree pairs: every
-source leaf must be the exact destination symlink, and no stale
-installer-owned checkout link may remain. It also requires the exact Codex
-`hooks.json` link, the Claude/Codex Herdr hook links and SessionStart entries,
-the dotfiles-owned Claude settings and Cursor `hooks.json` links, all three
-Claude boundary groups, all six fail-closed Cursor boundary events, and the
-required readable Claude/Codex/Cursor boundary adapter sources plus their
-shared policy core. Cursor's directly invoked adapter must also be executable.
-Validation continues to require the exact `jira`/`confluence` user MCP
-definitions. Any missing requirement makes `./install.sh` exit nonzero after
-printing its full summary.
+0.11.2, fzf >= 0.48.0, zoxide >= 0.9.0, executable release-binary and Herdr
+version probes, the Catppuccin
+plugin, the Claude/Codex Herdr hook links and SessionStart entries, the Codex
+hooks link, and exact `jira`/`confluence` user MCP definitions. Any missing
+requirement makes `./install.sh` exit nonzero after printing its full summary.

@@ -1,13 +1,13 @@
 {
-  "alwaysThinkingEnabled": true,
-  "autoCompactEnabled": true,
-  "editorMode": "normal",
-  "enableWorkflows": true,
   "env": {
     "CLAUDE_CODE_EFFORT_LEVEL": "max",
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "teammateMode": "tmux"
   },
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "opus",
   "hooks": {
     "PreToolUse": [
       {
@@ -19,57 +19,58 @@
         ]
       },
       {
+        "matcher": "Bash",
         "hooks": [
           {
-            "command": "~/.claude/hooks/slurm-bootstrap.sh",
-            "type": "command"
+            "type": "command",
+            "command": "~/.claude/hooks/slurm-bootstrap.sh"
           }
-        ],
-        "matcher": "Bash"
+        ]
       },
       {
+        "matcher": "Bash",
         "hooks": [
           {
-            "command": "~/.claude/hooks/slurm-mountcheck.sh",
-            "type": "command"
+            "type": "command",
+            "command": "~/.claude/hooks/slurm-mountcheck.sh"
           }
-        ],
-        "matcher": "Bash"
+        ]
       },
       {
+        "matcher": "Bash",
         "hooks": [
           {
-            "command": "~/.claude/hooks/rocprofiler-compute-precommit.sh",
-            "type": "command"
+            "type": "command",
+            "command": "~/.claude/hooks/rocprofiler-compute-precommit.sh"
           }
-        ],
-        "matcher": "Bash"
+        ]
       },
       {
+        "matcher": "ExitPlanMode|Skill",
         "hooks": [
           {
-            "command": "~/.claude/hooks/grill-me-gate.sh",
-            "type": "command"
+            "type": "command",
+            "command": "~/.claude/hooks/grill-me-gate.sh"
           }
-        ],
-        "matcher": "ExitPlanMode|Skill"
+        ]
       }
     ],
     "SessionStart": [
       {
         "hooks": [
           {
-            "command": "~/.claude/hooks/rocprofiler-compute-venv.sh",
-            "type": "command"
+            "type": "command",
+            "command": "~/.claude/hooks/rocprofiler-compute-venv.sh"
           }
         ]
       },
       {
+        "matcher": "*",
         "hooks": [
           {
+            "type": "command",
             "command": "bash \"$HOME/.claude/hooks/herdr-agent-state.sh\" session",
-            "timeout": 10,
-            "type": "command"
+            "timeout": 10
           }
         ],
         "matcher": "*"
@@ -77,6 +78,7 @@
     ],
     "SubagentStart": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\"",
@@ -99,25 +101,19 @@
       {
         "hooks": [
           {
-            "command": "~/.claude/hooks/grill-me-reset.sh",
-            "type": "command"
+            "type": "command",
+            "command": "~/.claude/hooks/grill-me-reset.sh"
           }
         ]
       }
     ]
   },
-  "model": "opus",
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  },
-  "showThinkingSummaries": false,
-  "skipDangerousModePermissionPrompt": true,
-  "speed": "fast",
+  "enableWorkflows": true,
   "statusLine": {
-    "command": "~/.claude/claude-statusline",
-    "type": "command"
+    "type": "command",
+    "command": "~/.claude/claude-statusline"
   },
-  "theme": "custom:snazzy-light",
+  "alwaysThinkingEnabled": true,
   "ultracode": true,
   "voice": {
     "enabled": true,

@@ -188,6 +188,16 @@ if command -v zoxide >/dev/null 2>&1; then
 fi
 
 if command -v fzf >/dev/null 2>&1; then
-    [ -f "$HOME/.fzf.bash" ] && . "$HOME/.fzf.bash"
+    export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+    export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+    export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
+    # Catppuccin Latte, matching @catppuccin_flavor in ~/dotfiles/tmux/.tmux.conf
+    export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border
+      --color=bg+:#ccd0da,bg:#eff1f5,spinner:#dc8a78,hl:#d20f39
+      --color=fg:#4c4f69,header:#d20f39,info:#8839ef,pointer:#dc8a78
+      --color=marker:#7287fd,fg+:#4c4f69,prompt:#8839ef,hl+:#d20f39
+      --color=selected-bg:#bcc0cc'
+    export FZF_CTRL_T_OPTS="--preview 'bat --style=numbers --color=always {}' --preview-window=right:60%"
+    export FZF_ALT_C_OPTS="--preview 'eza --icons=always --tree --level=2 --color=always {}'"
     eval "$(fzf --bash)"
 fi

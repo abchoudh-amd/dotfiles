@@ -8,6 +8,8 @@ LOCAL_OPT="$LOCAL_PREFIX/opt"
 LOCAL_GO="$LOCAL_PREFIX/go"
 NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 COMPUTE_SKILLS="$HOME/compute-ai-skills"
+FZF_MIN_VERSION=0.48.0
+ZOXIDE_MIN_VERSION=0.9.0
 BACKUP_DIR=""
 NEW_TEMP_DIR=""
 
@@ -236,14 +238,16 @@ download_github_asset() {
 
 install_release_binary() {
     local label="$1" command_name="$2" repository="$3" asset_regex="$4" binary_name="$5"
+    local min_version="${6:-}" version_fn="${7:-}"
     local extract_dir destination
     local -a matches=()
     if have "$command_name"; then
-        if binary_version_works "$(command -v "$command_name")"; then
+        if binary_version_works "$(command -v "$command_name")" &&
+           { [[ -z "$min_version" ]] || version_ge "$("$version_fn")" "$min_version"; }; then
             present "$command_name"
             return 0
         fi
-        warn "$command_name on PATH cannot complete a version probe; installing a user-local replacement"
+        warn "$command_name on PATH is missing a working version probe or is older than ${min_version:-required}; installing a user-local replacement"
     fi
     download_github_asset "$repository" "$asset_regex" || return 1
     make_temp_dir || return 1
@@ -256,8 +260,11 @@ install_release_binary() {
     destination="$LOCAL_BIN/$command_name"
     backup_existing "$destination" || return 1
     install -m 0755 "${matches[0]}" "$destination" || return 1
+    # The guard above hashed the outgoing binary; drop it so PATH order decides.
+    hash -r
     have "$command_name" || return 1
     binary_version_works "$destination" || return 1
+    [[ -z "$min_version" ]] || version_ge "$("$version_fn")" "$min_version" || return 1
     info "installed $label -> $destination"
 }
 
@@ -1145,16 +1152,23 @@ install_starship() {
 
 install_zoxide() {
     local script
-    if have zoxide; then present zoxide; return 0; fi
+    if have zoxide && version_ge "$(zoxide_version)" "$ZOXIDE_MIN_VERSION"; then
+        present zoxide
+        return 0
+    fi
     make_temp_dir || return 1
     script="$NEW_TEMP_DIR/zoxide-installer.sh"
     download https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh "$script" || return 1
-    sh "$script" || return 1
-    have zoxide
+    sh "$script" --bin-dir "$LOCAL_BIN" || return 1
+    # The guard above hashed the outgoing binary; drop it so PATH order decides.
+    hash -r
+    have zoxide && version_ge "$(zoxide_version)" "$ZOXIDE_MIN_VERSION"
 }
 
 tmux_version() { tmux -V 2>/dev/null | awk '{print $2}'; }
 nvim_version() { nvim --version 2>/dev/null | sed -n '1s/^NVIM v\{0,1\}//p'; }
+fzf_version() { fzf --version 2>/dev/null | awk '{print $1}'; }
+zoxide_version() { zoxide --version 2>/dev/null | awk '{print $2}' | sed 's/^v//'; }
 
 install_tmux() {
     local extract_dir source_dir jobs
@@ -1616,7 +1630,7 @@ validate_required_commands() {
     local command_name entry source_dir target_dir
     local -a commands=(
         git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
-        yazi ya glow codex sqlit claude starship zoxide fzf rg btop duf gh gitmux herdr tmux nvim
+        yazi ya glow codex sqlit claude starship zoxide fzf bat rg btop duf gh gitmux herdr tmux nvim
     )
     for command_name in "${commands[@]}"; do
         have "$command_name" || fail "required command missing: $command_name"
@@ -1627,7 +1641,13 @@ validate_required_commands() {
     if have nvim && ! version_ge "$(nvim_version)" 0.11.2; then
         fail "Neovim 0.11.2+ required"
     fi
-    for command_name in fzf rg btop duf gh gitmux herdr; do
+    if have fzf && ! version_ge "$(fzf_version)" "$FZF_MIN_VERSION"; then
+        fail "fzf $FZF_MIN_VERSION+ required"
+    fi
+    if have zoxide && ! version_ge "$(zoxide_version)" "$ZOXIDE_MIN_VERSION"; then
+        fail "zoxide $ZOXIDE_MIN_VERSION+ required"
+    fi
+    for command_name in fzf bat rg btop duf gh gitmux herdr; do
         if have "$command_name" && ! binary_version_works "$(command -v "$command_name")"; then
             fail "required command cannot execute a version probe: $command_name"
         fi
@@ -1751,8 +1771,9 @@ main() {
     section "User-local tools"
     attempt "install Starship" install_starship
     attempt "install zoxide" install_zoxide
-    attempt "install fzf" install_release_binary fzf fzf junegunn/fzf '^fzf-[^/]+-linux_amd64\.tar\.gz$' fzf
+    attempt "install fzf" install_release_binary fzf fzf junegunn/fzf '^fzf-[^/]+-linux_amd64\.tar\.gz$' fzf "$FZF_MIN_VERSION" fzf_version
     attempt "install ripgrep" install_release_binary ripgrep rg BurntSushi/ripgrep '^ripgrep-[^-]+-x86_64-unknown-linux-musl\.tar\.gz$' rg
+    attempt "install bat" install_release_binary bat bat sharkdp/bat '^bat-v[^-]+-x86_64-unknown-linux-musl\.tar\.gz$' bat
     attempt "install btop" install_release_binary btop btop aristocratos/btop '^btop-x86_64-unknown-linux-musl\.tar\.gz$' btop
     attempt "install duf" install_release_binary duf duf muesli/duf '^duf_[^_]+_linux_x86_64\.tar\.gz$' duf
     attempt "install GitHub CLI" install_release_binary gh gh cli/cli '^gh_[^_]+_linux_amd64\.tar\.gz$' gh
