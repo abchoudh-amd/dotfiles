@@ -1,8 +1,8 @@
 # dotfiles
 
-Personal environment configs for shell, Git, Claude Code, Codex, status line,
-and editor/TUI tools. The installer deploys tracked configuration with
-symlinks and keeps secrets out of Git.
+Personal environment configs for shell, Git, Claude Code, Codex, global Cursor
+runtime integration, status line, and editor/TUI tools. The installer deploys
+tracked configuration with symlinks and keeps secrets out of Git.
 
 ## Install
 
@@ -31,15 +31,21 @@ repository. Every RHEL-family path also installs EPEL. See the complete
 mandatory package and command inventory in [`TOOLS.md`](TOOLS.md).
 
 One run installs Rust, Go, Node/npm, uv, the required CLI/TUI tools (including
-Herdr), tmux and its plugins, and the Claude/Codex tooling before linking
-configuration and validating the result. Both Yazi commands, `yazi` and `ya`,
-are mandatory and are installed and validated separately.
+Herdr), tmux and its plugins, and the Claude/Codex tooling before activating
+the global Claude, Codex, and Cursor runtime content, linking configuration,
+and validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory
+and are installed and validated separately. The Cursor application itself is
+not installed.
 
-Claude and Codex skills/hooks require `~/compute-ai-skills`. If it is absent,
-the installer clones the expected `abchoudh-amd/compute-ai-skills` repository.
-It fast-forwards an existing clean `main` checkout, but preserves a dirty or
-non-`main` checkout with a warning. A checkout with an unexpected origin is a
-required failure.
+The shared Claude, Codex, and Cursor runtime content requires
+`~/compute-ai-skills`. If it is absent, the installer clones the expected
+`abchoudh-amd/compute-ai-skills` repository. An existing checkout must have an
+accepted origin. A clean `main` checkout is updated only with
+`pull --ff-only origin main`; an update failure keeps the existing checkout
+with a warning, while a dirty or non-`main` checkout is preserved without an
+update. A non-repository path or checkout with an unexpected origin is a
+required failure. If a failed initial clone leaves partial material, the
+installer moves it into the same private backup tree used for link conflicts.
 
 Herdr is also required. A `herdr` command on `PATH` that completes a version
 probe is retained. If it is missing or broken, the installer runs the official
@@ -54,11 +60,13 @@ Independent phases continue after a failure so the final summary can report
 everything that needs attention. A required failure produces a nonzero exit;
 fix the reported issue and run `./install.sh` again.
 
-After a successful run, review the installed Codex hooks with `/hooks`, complete
-any trust prompt Codex presents, restart Claude Code and Codex, and open a new
-shell so the installed paths and shell initializers are active. The installer
-enables Codex hooks but does not update trusted-hook hashes. Authentication
-remains a manual follow-up where the summary requests it.
+After a successful run, fully quit and reopen Cursor, and terminate and restart
+Claude Code and Codex so all three reload their global runtime content and hook
+configuration. In Codex, review the installed hooks with `/hooks` and complete
+any trust prompt it presents. Then open a new shell so the installed paths and
+shell initializers are active. The installer enables Codex hooks but does not
+update trusted-hook hashes. Authentication remains a manual follow-up where
+the summary requests it.
 
 ## What's tracked
 
@@ -70,8 +78,61 @@ remains a manual follow-up where the summary requests it.
 | Herdr           | `config/herdr/config.toml` -> `~/.config/herdr/config.toml`           |
 | Claude Code     | settings, status line, theme, and `claude/mcp-servers.json`           |
 | Codex           | `codex/config.toml` (key read from `$LLM_GATEWAY_KEY` at runtime)     |
+| Cursor          | `cursor/hooks.json` (global fail-closed boundary hook manifest)      |
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/btop`                           |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
+
+## Global Claude, Codex, and Cursor runtime content
+
+The installer exposes `~/compute-ai-skills` globally under each tool's
+user-home runtime. It links every immediate child of each source tree at the
+matching destination name rather than replacing the destination directory:
+
+| Runtime | Leaf-by-leaf trees |
+| --- | --- |
+| Claude | `skills`, native `agents`, `agent-resources`, `hooks`, and `references` |
+| Codex | `skills`, native `agents`, `agent-resources`, and `hooks` |
+| Cursor | `skills`, native `agents`, `agent-resources`, `hooks`, and `rules` |
+
+For example, the children of `~/compute-ai-skills/.cursor/skills/` become
+individual links under `~/.cursor/skills/`; the other trees follow the same
+source-to-runtime layout. This keeps unrelated entries in the runtime
+directories available. All listed source trees are required and are checked
+before reconciliation begins. Destination tree roots must be real directories;
+an existing symlink or non-directory is rejected before any runtime content is
+changed. The compute checkout also owns the Codex hook manifest, linked from
+`.codex/hooks.json` to `~/.codex/hooks.json`.
+
+Stale-link cleanup is deliberately narrow and recoverable. A destination is
+classified as an obsolete installer-owned link only when it is a symlink whose
+target exactly names the same leaf in `~/compute-ai-skills` and that source leaf
+no longer exists. Such a link is moved into the normal timestamped backup tree;
+it is not deleted. Personal files and directories, foreign symlinks, and other
+unmanaged entries are not swept. If an existing path collides with a currently
+managed source leaf, the installer's normal backup-and-link behavior applies.
+
+The tracked [`claude/settings.json`](claude/settings.json) adds exactly one
+boundary-hook group for each of `PreToolUse`, `SubagentStart`, and
+`SubagentStop`. Each group runs
+`python3 "$HOME/.claude/hooks/agent-boundary.py"`, whose script is supplied by
+the linked compute checkout.
+
+Dotfiles owns [`cursor/hooks.json`](cursor/hooks.json) and links it globally as
+`~/.cursor/hooks.json`. Its complete hook manifest runs the checkout-owned
+`$HOME/.cursor/hooks/agent-boundary.py` with `failClosed: true` for these six
+events: `subagentStart`, `preToolUse`, `beforeShellExecution`,
+`beforeMCPExecution`, `beforeReadFile`, and `subagentStop`.
+The adapters resolve their physical checkout path before importing the shared
+`agent_policy` core, so that directory is validated in place rather than linked
+separately into any runtime.
+
+Final validation requires every source leaf to have the exact matching runtime
+symlink and rejects any obsolete installer-owned link left behind. It also
+checks the exact Codex `hooks.json` link, the dotfiles-owned Claude settings and
+Cursor hook-manifest links, and all three Claude plus all six Cursor boundary
+hook groups. The three boundary adapters and their shared policy source must
+also exist and be readable, and Cursor's directly invoked adapter must be
+executable. Any mismatch makes the installer exit nonzero.
 
 ## Herdr agent integration
 
@@ -190,8 +251,8 @@ claude mcp login confluence
 ## Not included
 
 - ROCm or Slurm installation and cluster configuration.
-- Global Cursor skill, hook, or configuration links.
 - Desktop/GUI assets.
 - Authentication or secret values. Existing credentials may be preserved or
   seeded, but the installer does not supply real values or perform logins.
-- Claude/Codex history, sessions, databases, caches, and other mutable state.
+- Claude/Codex/Cursor history, sessions, databases, caches, and other mutable
+  state.

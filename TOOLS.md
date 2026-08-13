@@ -222,14 +222,71 @@ tokens, authorization headers, environment secrets, or client secrets in the
 manifest. No MCP credentials, secret-bearing headers, or authentication tokens
 belong in tracked files.
 
-## Other installed runtime content
+## Global compute-ai-skills runtime activation
 
-The installer clones or updates
+The installer activates
 [abchoudh-amd/compute-ai-skills](https://github.com/abchoudh-amd/compute-ai-skills)
-at `~/compute-ai-skills` and links its Claude/Codex skills and hooks into the
-corresponding user runtime directories. A dirty checkout or a checkout not on
-`main` is preserved without update. Final validation requires the Codex
-`hooks.json` symlink.
+globally for Claude, Codex, and Cursor from `~/compute-ai-skills`. If that path
+is absent, it clones the repository's `main` branch noninteractively. An
+existing path must be a Git checkout with one of the accepted HTTPS or SSH
+origins for that repository; an unexpected origin or non-checkout is a required
+failure. A clean checkout on `main` is updated only with
+`git pull --ff-only origin main`, pinning the update to the already verified
+remote and branch. If that fast-forward cannot be completed, the existing
+checkout remains in use and the installer warns. A dirty checkout or one on
+another branch is preserved without any update. Partial material left by a
+failed first clone is moved recoverably into the private timestamped backup
+tree.
+
+The following source trees are all required. Each immediate child, including a
+dot-prefixed child, is linked separately at the same name under the matching
+user runtime tree:
+
+| Runtime | Checkout trees linked leaf by leaf | Global destination trees |
+| --- | --- | --- |
+| Claude | `.claude/skills`, `.claude/agents`, `.claude/agent-resources`, `.claude/hooks`, `.claude/references` | `~/.claude/skills`, `~/.claude/agents`, `~/.claude/agent-resources`, `~/.claude/hooks`, `~/.claude/references` |
+| Codex | `.codex/skills`, `.codex/agents`, `.codex/agent-resources`, `.codex/hooks` | `~/.codex/skills`, `~/.codex/agents`, `~/.codex/agent-resources`, `~/.codex/hooks` |
+| Cursor | `.cursor/skills`, `.cursor/agents`, `.cursor/agent-resources`, `.cursor/hooks`, `.cursor/rules` | `~/.cursor/skills`, `~/.cursor/agents`, `~/.cursor/agent-resources`, `~/.cursor/hooks`, `~/.cursor/rules` |
+
+The `agents` trees contain each runtime's native agent definitions;
+`agent-resources` keeps their supporting material separately available. Linking
+the direct children instead of each whole destination tree preserves unrelated
+personal content alongside the managed skills, agents, resources, hooks,
+Claude references, and Cursor rules. All source trees are validated before any
+runtime reconciliation starts. Each destination tree root must be a real
+directory or absent; symlinked roots and non-directories are rejected before
+cleanup or linking so the installer never follows them into the checkout or a
+foreign location.
+
+Cleanup of names removed upstream is intentionally limited. An entry is stale
+and installer-owned only when it is a destination symlink whose literal target
+is the same-named path in the corresponding `~/compute-ai-skills` source tree
+and that source no longer exists. The installer moves only those links into its
+private timestamped backup tree. It does not sweep personal files or
+directories, symlinks to foreign targets, or other unmanaged entries. A
+same-name collision with a source that still exists follows the standard
+recoverable backup-and-link path.
+
+Codex's checkout-owned `.codex/hooks.json` is linked to
+`~/.codex/hooks.json`. Claude's global boundary configuration remains in the
+dotfiles-owned `claude/settings.json`: it contains one command group invoking
+`python3 "$HOME/.claude/hooks/agent-boundary.py"` for each of `PreToolUse`,
+`SubagentStart`, and `SubagentStop`.
+
+Cursor's global hook manifest is instead dotfiles-owned:
+[`cursor/hooks.json`](cursor/hooks.json) is linked to `~/.cursor/hooks.json`.
+The manifest is restricted to six boundary events, and every entry runs the
+literal `$HOME/.cursor/hooks/agent-boundary.py` command with `failClosed: true`:
+`subagentStart`, `preToolUse`, `beforeShellExecution`, `beforeMCPExecution`,
+`beforeReadFile`, and `subagentStop`. The invoked script comes from the linked
+checkout hook tree. Each adapter resolves its physical checkout path to import
+the shared `agent_policy` core, which remains in the checkout and is not linked
+separately.
+
+After installation, fully quit and reopen Cursor, and terminate and restart
+Claude Code and Codex so they reload the global runtime and hooks. In Codex,
+also inspect `/hooks` and complete any trust prompt; hook support is enabled,
+but installation does not update trusted-hook hashes.
 
 ## Final validation contract
 
@@ -242,7 +299,15 @@ herdr tmux nvim
 ```
 
 In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
-0.11.2, executable release-binary and Herdr version probes, the Catppuccin
-plugin, the Claude/Codex Herdr hook links and SessionStart entries, the Codex
-hooks link, and exact `jira`/`confluence` user MCP definitions. Any missing
-requirement makes `./install.sh` exit nonzero after printing its full summary.
+0.11.2, executable release-binary and Herdr version probes, and the Catppuccin
+plugin. It checks all 14 compute-ai-skills source/destination tree pairs: every
+source leaf must be the exact destination symlink, and no stale
+installer-owned checkout link may remain. It also requires the exact Codex
+`hooks.json` link, the Claude/Codex Herdr hook links and SessionStart entries,
+the dotfiles-owned Claude settings and Cursor `hooks.json` links, all three
+Claude boundary groups, all six fail-closed Cursor boundary events, and the
+required readable Claude/Codex/Cursor boundary adapter sources plus their
+shared policy core. Cursor's directly invoked adapter must also be executable.
+Validation continues to require the exact `jira`/`confluence` user MCP
+definitions. Any missing requirement makes `./install.sh` exit nonzero after
+printing its full summary.
