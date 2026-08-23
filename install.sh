@@ -13,23 +13,6 @@ ZOXIDE_MIN_VERSION=0.9.0
 BACKUP_DIR=""
 NEW_TEMP_DIR=""
 
-declare -a COMPUTE_RUNTIME_TREES=(
-    "$COMPUTE_SKILLS/.claude/skills|$HOME/.claude/skills"
-    "$COMPUTE_SKILLS/.claude/agents|$HOME/.claude/agents"
-    "$COMPUTE_SKILLS/.claude/agent-resources|$HOME/.claude/agent-resources"
-    "$COMPUTE_SKILLS/.claude/hooks|$HOME/.claude/hooks"
-    "$COMPUTE_SKILLS/.claude/references|$HOME/.claude/references"
-    "$COMPUTE_SKILLS/.codex/skills|$HOME/.codex/skills"
-    "$COMPUTE_SKILLS/.codex/agents|$HOME/.codex/agents"
-    "$COMPUTE_SKILLS/.codex/agent-resources|$HOME/.codex/agent-resources"
-    "$COMPUTE_SKILLS/.codex/hooks|$HOME/.codex/hooks"
-    "$COMPUTE_SKILLS/.cursor/skills|$HOME/.cursor/skills"
-    "$COMPUTE_SKILLS/.cursor/agents|$HOME/.cursor/agents"
-    "$COMPUTE_SKILLS/.cursor/agent-resources|$HOME/.cursor/agent-resources"
-    "$COMPUTE_SKILLS/.cursor/hooks|$HOME/.cursor/hooks"
-    "$COMPUTE_SKILLS/.cursor/rules|$HOME/.cursor/rules"
-)
-
 declare -a TEMP_DIRS=()
 declare -a INSTALLED=()
 declare -a PRESENT=()
@@ -1247,7 +1230,6 @@ link_dotfiles() {
         "$DOTFILES/claude/hooks/herdr-agent-state.sh|$HOME/.claude/hooks/herdr-agent-state.sh"
         "$DOTFILES/claude/themes/snazzy-light.json|$HOME/.claude/themes/snazzy-light.json"
         "$DOTFILES/codex/config.toml|$HOME/.codex/config.toml"
-        "$DOTFILES/cursor/hooks.json|$HOME/.cursor/hooks.json"
         "$DOTFILES/tmux/.tmux.conf|$HOME/.tmux.conf"
         "$DOTFILES/tmux/.gitmux.conf|$HOME/.gitmux.conf"
     )
@@ -1326,91 +1308,8 @@ skills_origin_is_expected() {
     esac
 }
 
-runtime_source_dir_is_usable() {
-    local source_dir="$1"
-    [[ -d "$source_dir" && -r "$source_dir" && -x "$source_dir" ]]
-}
-
-link_runtime_tree() {
-    local source_dir="$1" target_dir="$2" source_path
-    runtime_source_dir_is_usable "$source_dir" || return 1
-    runtime_target_dir_is_safe "$target_dir" "$source_dir" || return 1
-    mkdir -p "$target_dir" || return 1
-    [[ -d "$target_dir" && ! -L "$target_dir" ]] || return 1
-    for source_path in \
-        "$source_dir"/* "$source_dir"/.[!.]* "$source_dir"/..?*; do
-        [[ -e "$source_path" || -L "$source_path" ]] || continue
-        link_path "$source_path" "$target_dir/$(basename "$source_path")" || {
-            return 1
-        }
-    done
-    return 0
-}
-
-obsolete_runtime_link_is_owned() {
-    local source_dir="$1" target_path="$2" expected_source actual_source
-    runtime_source_dir_is_usable "$source_dir" || return 1
-    [[ -L "$target_path" ]] || return 1
-    expected_source="$source_dir/$(basename "$target_path")"
-    actual_source="$(readlink "$target_path")" || return 1
-    [[ "$actual_source" == "$expected_source" ]] || return 1
-    [[ ! -e "$expected_source" && ! -L "$expected_source" ]]
-}
-
-runtime_target_dir_is_safe() {
-    local target_dir="$1" source_dir="${2:-}"
-    [[ ! -L "$target_dir" ]] || return 1
-    [[ ! -e "$target_dir" || -d "$target_dir" ]] || return 1
-    if [[ -n "$source_dir" && -e "$target_dir" && "$source_dir" -ef "$target_dir" ]]; then
-        return 1
-    fi
-    return 0
-}
-
-backup_obsolete_runtime_links() {
-    local source_dir="$1" target_dir="$2" target_path
-    runtime_source_dir_is_usable "$source_dir" || return 1
-    runtime_target_dir_is_safe "$target_dir" "$source_dir" || return 1
-    [[ -d "$target_dir" ]] || return 0
-    for target_path in \
-        "$target_dir"/* "$target_dir"/.[!.]* "$target_dir"/..?*; do
-        [[ -e "$target_path" || -L "$target_path" ]] || continue
-        if obsolete_runtime_link_is_owned "$source_dir" "$target_path"; then
-            backup_existing "$target_path" || return 1
-        fi
-    done
-    return 0
-}
-
-runtime_tree_is_reconciled() {
-    local source_dir="$1" target_dir="$2" source_path target_path
-    runtime_source_dir_is_usable "$source_dir" || return 1
-    [[ -d "$target_dir" && ! -L "$target_dir" ]] || return 1
-    [[ ! "$source_dir" -ef "$target_dir" ]] || return 1
-    for source_path in \
-        "$source_dir"/* "$source_dir"/.[!.]* "$source_dir"/..?*; do
-        [[ -e "$source_path" || -L "$source_path" ]] || continue
-        target_path="$target_dir/$(basename "$source_path")"
-        [[ -L "$target_path" ]] || return 1
-        [[ "$(readlink "$target_path")" == "$source_path" ]] || return 1
-    done
-    for target_path in \
-        "$target_dir"/* "$target_dir"/.[!.]* "$target_dir"/..?*; do
-        [[ -e "$target_path" || -L "$target_path" ]] || continue
-        obsolete_runtime_link_is_owned "$source_dir" "$target_path" && return 1
-    done
-    return 0
-}
-
 compute_runtime_sources_are_valid() {
-    local entry source_dir required_file
-    for entry in "${COMPUTE_RUNTIME_TREES[@]}"; do
-        source_dir="${entry%%|*}"
-        if ! runtime_source_dir_is_usable "$source_dir"; then
-            info "required compute-ai-skills runtime tree missing or inaccessible: $source_dir" >&2
-            return 1
-        fi
-    done
+    local required_file
     [[ -f "$COMPUTE_SKILLS/.codex/hooks.json" ]] || {
         info "required compute-ai-skills Codex hooks missing: $COMPUTE_SKILLS/.codex/hooks.json" >&2
         return 1
@@ -1418,8 +1317,10 @@ compute_runtime_sources_are_valid() {
     for required_file in \
         "$COMPUTE_SKILLS/.claude/hooks/agent-boundary.py" \
         "$COMPUTE_SKILLS/.codex/hooks/agent-boundary.py" \
-        "$COMPUTE_SKILLS/.cursor/hooks/agent-boundary.py" \
-        "$COMPUTE_SKILLS/agent_policy/core.py"; do
+        "$COMPUTE_SKILLS/agent_policy/core.py" \
+        "$COMPUTE_SKILLS/runtime_install/core.py" \
+        "$COMPUTE_SKILLS/scripts/install-claude.py" \
+        "$COMPUTE_SKILLS/scripts/install-codex.py"; do
         if [[ ! -f "$required_file" ]]; then
             info "required compute-ai-skills boundary source missing: $required_file" >&2
             return 1
@@ -1429,26 +1330,19 @@ compute_runtime_sources_are_valid() {
             return 1
         fi
     done
-    if [[ ! -x "$COMPUTE_SKILLS/.cursor/hooks/agent-boundary.py" ]]; then
-        info "required compute-ai-skills Cursor boundary hook is not executable: $COMPUTE_SKILLS/.cursor/hooks/agent-boundary.py" >&2
-        return 1
-    fi
 }
 
-compute_runtime_targets_are_safe() {
-    local entry source_dir target_dir
-    for entry in "${COMPUTE_RUNTIME_TREES[@]}"; do
-        source_dir="${entry%%|*}"
-        target_dir="${entry#*|}"
-        if ! runtime_target_dir_is_safe "$target_dir" "$source_dir"; then
-            info "runtime target must be a real directory, not a symlink or file: $target_dir" >&2
-            return 1
-        fi
-    done
+# The checkout owns the collision-safe symlink engine for its own runtime
+# trees, so dotfiles delegates instead of reimplementing it. Exit codes are
+# 0 aligned, 1 safely repairable, 2 unsafe collision or invalid inventory.
+compute_installer_run() {
+    local script="$1"
+    shift
+    python3 -B "$COMPUTE_SKILLS/scripts/$script" "$@"
 }
 
 install_compute_skills() {
-    local origin branch status entry source_dir target_dir
+    local origin branch status claude_check
     local herdr_hook_source="$COMPUTE_SKILLS/.codex/hooks/herdr-agent-state.sh"
     if [[ ! -e "$COMPUTE_SKILLS" && ! -L "$COMPUTE_SKILLS" ]]; then
         mkdir "$COMPUTE_SKILLS" || return 1
@@ -1480,19 +1374,35 @@ install_compute_skills() {
         return 1
     fi
     compute_runtime_sources_are_valid || return 1
-    compute_runtime_targets_are_safe || return 1
-    for entry in "${COMPUTE_RUNTIME_TREES[@]}"; do
-        source_dir="${entry%%|*}"
-        target_dir="${entry#*|}"
-        backup_obsolete_runtime_links "$source_dir" "$target_dir" || return 1
-    done
-    for entry in "${COMPUTE_RUNTIME_TREES[@]}"; do
-        source_dir="${entry%%|*}"
-        target_dir="${entry#*|}"
-        link_runtime_tree "$source_dir" "$target_dir" || return 1
-    done
-    link_path "$herdr_hook_source" "$HOME/.codex/herdr-agent-state.sh" || return 1
-    link_path "$COMPUTE_SKILLS/.codex/hooks.json" "$HOME/.codex/hooks.json" || return 1
+
+    # The Codex installer owns every ~/.codex runtime link, including
+    # hooks.json and the HERDR hook, and prunes the obsolete top-level
+    # ~/.codex/herdr-agent-state.sh that earlier versions of this script made.
+    compute_installer_run install-codex.py --install
+    case $? in
+        0|1) ;;
+        *) info "Codex runtime install refused an unsafe collision" >&2; return 1 ;;
+    esac
+
+    # Claude is installed links-only. Its settings hooks live in the tracked
+    # claude/settings.json, which ~/.claude/settings.json symlinks to, and the
+    # installer would otherwise write through that link into this repository.
+    # Dotfiles stays authoritative: report upstream hook drift and let a human
+    # reconcile it by hand.
+    claude_check="$(compute_installer_run install-claude.py --check 2>&1)"
+    case $? in
+        0|1) ;;
+        *) info "Claude runtime check refused an unsafe collision" >&2; return 1 ;;
+    esac
+    if grep -q '^repairable: settings' <<< "$claude_check"; then
+        warn "compute-ai-skills declares Claude hooks absent from $DOTFILES/claude/settings.json; reconcile by hand (skipping Claude install)"
+        return 0
+    fi
+    compute_installer_run install-claude.py --install
+    case $? in
+        0|1) return 0 ;;
+        *) info "Claude runtime install refused an unsafe collision" >&2; return 1 ;;
+    esac
 }
 
 herdr_hook_is_valid() {
@@ -1540,7 +1450,7 @@ claude_herdr_session_start_is_exact() {
 codex_herdr_session_start_is_exact() {
     local hooks="$1"
     json_document_has_unique_object_keys "$hooks" || return 1
-    jq -e --arg expected_command 'bash "$HOME/.codex/herdr-agent-state.sh" session' '
+    jq -e --arg expected_command 'bash "$HOME/.codex/hooks/herdr-agent-state.sh" session' '
         if (.hooks.SessionStart | type) != "array" then
             false
         else
@@ -1568,19 +1478,22 @@ claude_boundary_hooks_are_exact() {
     local settings="$1"
     json_document_has_unique_object_keys "$settings" || return 1
     jq -e --arg expected_command 'python3 "$HOME/.claude/hooks/agent-boundary.py"' '
-        def boundary_group:
-            {
-                hooks: [{
-                    command: $expected_command,
-                    type: "command"
-                }]
-            };
+        # An absent, empty, or "*" matcher all name every tool, so accept any
+        # of those spellings for the boundary group.
+        def is_boundary_group:
+            (to_entries | map(.key) | sort) as $keys
+            | ($keys == ["hooks"] or $keys == ["hooks", "matcher"])
+            and ((.matcher // "*") | ascii_downcase | . == "" or . == "*")
+            and .hooks == [{
+                command: $expected_command,
+                type: "command"
+            }];
         . as $root
         | ["PreToolUse", "SubagentStart", "SubagentStop"] as $events
         | all($events[];
             . as $event
             | ($root.hooks[$event] | type) == "array"
-            and ([$root.hooks[$event][] | select(. == boundary_group)] | length) == 1
+            and ([$root.hooks[$event][] | select(is_boundary_group)] | length) == 1
             and ([$root.hooks[$event] | .. | objects
                   | select(.command? == $expected_command)] | length) == 1
         )
@@ -1591,43 +1504,8 @@ claude_boundary_hooks_are_exact() {
     ' "$settings" >/dev/null
 }
 
-cursor_boundary_hooks_are_exact() {
-    local hooks="$1"
-    json_document_has_unique_object_keys "$hooks" || return 1
-    jq -e --arg expected_command '$HOME/.cursor/hooks/agent-boundary.py' '
-        . == {
-            hooks: {
-                subagentStart: [{
-                    command: $expected_command,
-                    failClosed: true
-                }],
-                preToolUse: [{
-                    command: $expected_command,
-                    failClosed: true
-                }],
-                beforeShellExecution: [{
-                    command: $expected_command,
-                    failClosed: true
-                }],
-                beforeMCPExecution: [{
-                    command: $expected_command,
-                    failClosed: true
-                }],
-                beforeReadFile: [{
-                    command: $expected_command,
-                    failClosed: true
-                }],
-                subagentStop: [{
-                    command: $expected_command,
-                    failClosed: true
-                }]
-            }
-        }
-    ' "$hooks" >/dev/null
-}
-
 validate_required_commands() {
-    local command_name entry source_dir target_dir
+    local command_name
     local -a commands=(
         git curl jq fish python3 cargo go node npm uv eza fd diskus csvlens
         yazi ya glow codex sqlit claude starship zoxide fzf bat rg btop duf gh gitmux herdr tmux nvim
@@ -1656,13 +1534,12 @@ validate_required_commands() {
     if ! compute_runtime_sources_are_valid; then
         fail "compute-ai-skills runtime sources missing or invalid"
     fi
-    for entry in "${COMPUTE_RUNTIME_TREES[@]}"; do
-        source_dir="${entry%%|*}"
-        target_dir="${entry#*|}"
-        if ! runtime_tree_is_reconciled "$source_dir" "$target_dir"; then
-            fail "compute-ai-skills runtime tree missing or invalid: $target_dir"
-        fi
-    done
+    if ! compute_installer_run install-claude.py --check >/dev/null 2>&1; then
+        fail "compute-ai-skills Claude runtime not aligned; run install-claude.py --check"
+    fi
+    if ! compute_installer_run install-codex.py --check >/dev/null 2>&1; then
+        fail "compute-ai-skills Codex runtime not aligned; run install-codex.py --check"
+    fi
     if [[ ! -L "$HOME/.codex/hooks.json" ]] ||
        [[ "$(readlink "$HOME/.codex/hooks.json" 2>/dev/null)" != \
           "$COMPUTE_SKILLS/.codex/hooks.json" ]]; then
@@ -1678,11 +1555,6 @@ validate_required_commands() {
         "$COMPUTE_SKILLS/.codex/hooks/herdr-agent-state.sh" codex; then
         fail "Codex HERDR hook-tree link missing or invalid"
     fi
-    if ! herdr_hook_is_valid \
-        "$HOME/.codex/herdr-agent-state.sh" \
-        "$COMPUTE_SKILLS/.codex/hooks/herdr-agent-state.sh" codex; then
-        fail "Codex HERDR runtime hook link missing or invalid"
-    fi
     if ! claude_herdr_session_start_is_exact "$HOME/.claude/settings.json"; then
         fail "Claude HERDR SessionStart hook missing or invalid"
     fi
@@ -1696,14 +1568,6 @@ validate_required_commands() {
     fi
     if ! claude_boundary_hooks_are_exact "$HOME/.claude/settings.json"; then
         fail "Claude boundary hooks missing or invalid"
-    fi
-    if [[ ! -L "$HOME/.cursor/hooks.json" ]] ||
-       [[ "$(readlink "$HOME/.cursor/hooks.json" 2>/dev/null)" != \
-          "$DOTFILES/cursor/hooks.json" ]]; then
-        fail "Cursor hooks.json link missing or invalid"
-    fi
-    if ! cursor_boundary_hooks_are_exact "$HOME/.cursor/hooks.json"; then
-        fail "Cursor boundary hooks missing or invalid"
     fi
     if ! claude_mcp_state_is_exact \
         "$HOME/.claude.json" "$DOTFILES/claude/mcp-servers.json"; then
@@ -1725,8 +1589,7 @@ print_summary() {
     info "post-install: authenticate gh/Claude/Codex/Jira as needed"
     info "post-install: run 'claude mcp login jira' as needed"
     info "post-install: run 'claude mcp login confluence' as needed"
-    info "post-install: review Codex hooks with /hooks, then restart Claude, Codex, and Cursor"
-    info "post-install: fully quit and reopen Cursor after runtime or hook changes"
+    info "post-install: review Codex hooks with /hooks, then restart Claude and Codex"
     info "open a new shell after installation"
 }
 
@@ -1789,7 +1652,7 @@ main() {
     section "tmux plugins"
     attempt "install TPM and Catppuccin" install_tmux_plugins
 
-    section "Claude, Codex, and Cursor runtime content"
+    section "Claude and Codex runtime content"
     attempt "install compute-ai-skills" install_compute_skills
 
     section "Final validation"

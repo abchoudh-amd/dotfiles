@@ -1,6 +1,6 @@
 # dotfiles
 
-Personal environment configs for shell, Git, Claude Code, Codex, global Cursor
+Personal environment configs for shell, Git, Claude Code, Codex, global agent
 runtime integration, status line, and editor/TUI tools. The installer deploys
 tracked configuration with symlinks and keeps secrets out of Git.
 
@@ -32,12 +32,12 @@ mandatory package and command inventory in [`TOOLS.md`](TOOLS.md).
 
 One run installs Rust, Go, Node/npm, uv, the required CLI/TUI tools (including
 Herdr), tmux and its plugins, and the Claude/Codex tooling before activating
-the global Claude, Codex, and Cursor runtime content, linking configuration,
-and validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory
-and are installed and validated separately. The Cursor application itself is
-not installed.
+the global Claude and Codex runtime content, linking configuration, and
+validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory and
+are installed and validated separately. Cursor is neither installed nor
+configured.
 
-The shared Claude, Codex, and Cursor runtime content requires
+The shared Claude and Codex runtime content requires
 `~/compute-ai-skills`. If it is absent, the installer clones the expected
 `abchoudh-amd/compute-ai-skills` repository. An existing checkout must have an
 accepted origin. A clean `main` checkout is updated only with
@@ -60,9 +60,9 @@ Independent phases continue after a failure so the final summary can report
 everything that needs attention. A required failure produces a nonzero exit;
 fix the reported issue and run `./install.sh` again.
 
-After a successful run, fully quit and reopen Cursor, and terminate and restart
-Claude Code and Codex so all three reload their global runtime content and hook
-configuration. In Codex, review the installed hooks with `/hooks` and complete
+After a successful run, terminate and restart Claude Code and Codex so both
+reload their global runtime content and hook configuration. In Codex, review
+the installed hooks with `/hooks` and complete
 any trust prompt it presents. Then open a new shell so the installed paths and
 shell initializers are active. The installer enables Codex hooks but does not
 update trusted-hook hashes. Authentication remains a manual follow-up where
@@ -78,61 +78,64 @@ the summary requests it.
 | Herdr           | `config/herdr/config.toml` -> `~/.config/herdr/config.toml`           |
 | Claude Code     | settings, status line, theme, and `claude/mcp-servers.json`           |
 | Codex           | `codex/config.toml` (key read from `$LLM_GATEWAY_KEY` at runtime)     |
-| Cursor          | `cursor/hooks.json` (global fail-closed boundary hook manifest)      |
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/btop`                           |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
 
-## Global Claude, Codex, and Cursor runtime content
+## Global Claude and Codex runtime content
 
-The installer exposes `~/compute-ai-skills` globally under each tool's
-user-home runtime. It links every immediate child of each source tree at the
-matching destination name rather than replacing the destination directory:
+`~/compute-ai-skills` owns the installers for its own runtime content, so this
+repository delegates to them rather than reimplementing their link engine.
+After the checkout is cloned, validated, and fast-forwarded, `install.sh` runs:
 
-| Runtime | Leaf-by-leaf trees |
-| --- | --- |
-| Claude | `skills`, native `agents`, `agent-resources`, `hooks`, and `references` |
-| Codex | `skills`, native `agents`, `agent-resources`, and `hooks` |
-| Cursor | `skills`, native `agents`, `agent-resources`, `hooks`, and `rules` |
+```bash
+python3 -B ~/compute-ai-skills/scripts/install-codex.py  --install
+python3 -B ~/compute-ai-skills/scripts/install-claude.py --install
+```
 
-For example, the children of `~/compute-ai-skills/.cursor/skills/` become
-individual links under `~/.cursor/skills/`; the other trees follow the same
-source-to-runtime layout. This keeps unrelated entries in the runtime
-directories available. All listed source trees are required and are checked
-before reconciliation begins. Destination tree roots must be real directories;
-an existing symlink or non-directory is rejected before any runtime content is
-changed. The compute checkout also owns the Codex hook manifest, linked from
-`.codex/hooks.json` to `~/.codex/hooks.json`.
+Both share one standard-library engine in the checkout's `runtime_install/`,
+so their safety rules and exit codes are identical: `0` when every link is
+aligned, `1` for safely repairable missing or obsolete links, and `2` for an
+invalid inventory or any collision. The engine never clobbers an existing
+path — a regular file, a broken link, or a link to the wrong target makes it
+refuse and exit `2` before changing anything. Each installer also validates its
+own inventory, so a renamed or missing skill, agent, or hook fails before any
+link is written. `~/.codex/hooks.json` and the Codex HERDR hook are part of
+that inventory.
 
-Stale-link cleanup is deliberately narrow and recoverable. A destination is
-classified as an obsolete installer-owned link only when it is a symlink whose
-target exactly names the same leaf in `~/compute-ai-skills` and that source leaf
-no longer exists. Such a link is moved into the normal timestamped backup tree;
-it is not deleted. Personal files and directories, foreign symlinks, and other
-unmanaged entries are not swept. If an existing path collides with a currently
-managed source leaf, the installer's normal backup-and-link behavior applies.
+Claude is installed **links-only**. Its user-scoped hooks live in the tracked
+[`claude/settings.json`](claude/settings.json), which `~/.claude/settings.json`
+symlinks to, and the upstream installer would otherwise resolve that symlink
+and write through it into this repository. So `install.sh` runs the Claude
+installer in `--check` mode first: if it reports that a hook entry is missing
+from the settings file, the run warns and skips the Claude install, leaving the
+tracked file for a human to reconcile. Dotfiles stays authoritative over its
+own settings.
 
-The tracked [`claude/settings.json`](claude/settings.json) adds exactly one
-boundary-hook group for each of `PreToolUse`, `SubagentStart`, and
-`SubagentStop`. Each group runs
+The tracked `claude/settings.json` adds exactly one boundary-hook group for
+each of `PreToolUse`, `SubagentStart`, and `SubagentStop`. Each group runs
 `python3 "$HOME/.claude/hooks/agent-boundary.py"`, whose script is supplied by
-the linked compute checkout.
+the linked compute checkout. An absent, empty, or `*` matcher on those groups
+all mean every tool and are accepted interchangeably.
 
-Dotfiles owns [`cursor/hooks.json`](cursor/hooks.json) and links it globally as
-`~/.cursor/hooks.json`. Its complete hook manifest runs the checkout-owned
-`$HOME/.cursor/hooks/agent-boundary.py` with `failClosed: true` for these six
-events: `subagentStart`, `preToolUse`, `beforeShellExecution`,
-`beforeMCPExecution`, `beforeReadFile`, and `subagentStop`.
-The adapters resolve their physical checkout path before importing the shared
-`agent_policy` core, so that directory is validated in place rather than linked
-separately into any runtime.
+`.claude/references/` is deliberately **not** linked. A Claude skill reaches
+the shared contracts through `../../references/<file>.md`, and because
+`~/.claude/skills/<skill>` is a symlink into the checkout, the kernel resolves
+that path from the physical directory back into the checkout's own
+`.claude/references/`. The boundary adapters likewise resolve their physical
+checkout path before importing the shared `agent_policy` core, so that
+directory is validated in place rather than linked into any runtime.
 
-Final validation requires every source leaf to have the exact matching runtime
-symlink and rejects any obsolete installer-owned link left behind. It also
-checks the exact Codex `hooks.json` link, the dotfiles-owned Claude settings and
-Cursor hook-manifest links, and all three Claude plus all six Cursor boundary
-hook groups. The three boundary adapters and their shared policy source must
-also exist and be readable, and Cursor's directly invoked adapter must be
-executable. Any mismatch makes the installer exit nonzero.
+Cursor is not installed. The checkout documents it as manual-only and ships no
+Cursor installer; symlink its runtime trees and merge its hook manifest by hand
+if you want it.
+
+Final validation re-runs both installers in `--check` mode and requires each to
+report an aligned installation. It also checks the exact Codex `hooks.json`
+link, the dotfiles-owned Claude settings link, the Claude and Codex HERDR hook
+links and their `SessionStart` entries, and all three Claude boundary hook
+groups. The two boundary adapters, the shared policy source, and both installer
+scripts must exist and be readable. Any mismatch makes the installer exit
+nonzero.
 
 ## Herdr agent integration
 
@@ -151,12 +154,13 @@ after installation so the new hook configuration is loaded.
 
 The tracked Codex configuration enables hook support, while
 `~/compute-ai-skills` owns the corresponding v0.7.5 Codex hook (integration ID
-`codex`, version `6`) and `hooks.json`. Inside a Herdr-managed pane, these hooks
-report the native Claude or Codex session identity to Herdr's local socket. They
-exit quietly outside that environment and do not report activity transitions,
-so Herdr continues to derive agent status from pane output. Claude's
-`teammateMode` remains `tmux`, and the Herdr integration does not replace or
-change the tracked tmux configuration.
+`codex`, version `6`) and `hooks.json`. Its installer links that hook at
+`~/.codex/hooks/herdr-agent-state.sh`, which is the path its `SessionStart`
+entry invokes. Inside a Herdr-managed pane, these hooks report the native
+Claude or Codex session identity to Herdr's local socket. They exit quietly
+outside that environment and do not report activity transitions, so Herdr
+continues to derive agent status from pane output. The Herdr integration does
+not replace or change the tracked tmux configuration.
 
 > **Warning:** Do not run `herdr integration install` against these managed
 > integrations. The live hook paths are symlinks, so that command can rewrite

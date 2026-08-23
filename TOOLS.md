@@ -159,17 +159,17 @@ install time:
   `SessionStart` invocation of
   `bash "$HOME/.claude/hooks/herdr-agent-state.sh" session`.
 - `~/compute-ai-skills` owns `.codex/hooks/herdr-agent-state.sh` (integration ID
-  `codex`, version `6`) and the Codex `hooks.json`. The installer links the hook
-  into `~/.codex/hooks/` and also at `~/.codex/herdr-agent-state.sh`, the path
-  used by its matcher-free, timeout-10 `SessionStart` entry. The tracked Codex
-  config enables `[features] hooks = true`.
+  `codex`, version `6`) and the Codex `hooks.json`. Its installer links the hook
+  into `~/.codex/hooks/`, the path used by its matcher-free, timeout-10
+  `SessionStart` entry, and prunes the obsolete top-level
+  `~/.codex/herdr-agent-state.sh`. The tracked Codex config enables
+  `[features] hooks = true`.
 
 The hooks report native session identity to Herdr's local Unix socket only when
 Herdr has supplied its pane environment (`HERDR_ENV`, `HERDR_SOCKET_PATH`, and
 `HERDR_PANE_ID`); otherwise they exit successfully without reporting. They do
 not publish activity-state transitions, so Herdr's agent status remains derived
-from pane output. Claude's `teammateMode = "tmux"` and the existing tmux setup
-continue unchanged.
+from pane output. The existing tmux setup continues unchanged.
 
 Restart Claude Code and Codex after installation. In Codex, inspect `/hooks`
 and complete any trust prompt it presents; installation enables hook support
@@ -235,7 +235,7 @@ belong in tracked files.
 
 The installer activates
 [abchoudh-amd/compute-ai-skills](https://github.com/abchoudh-amd/compute-ai-skills)
-globally for Claude, Codex, and Cursor from `~/compute-ai-skills`. If that path
+globally for Claude and Codex from `~/compute-ai-skills`. If that path
 is absent, it clones the repository's `main` branch noninteractively. An
 existing path must be a Git checkout with one of the accepted HTTPS or SSH
 origins for that repository; an unexpected origin or non-checkout is a required
@@ -247,55 +247,57 @@ another branch is preserved without any update. Partial material left by a
 failed first clone is moved recoverably into the private timestamped backup
 tree.
 
-The following source trees are all required. Each immediate child, including a
-dot-prefixed child, is linked separately at the same name under the matching
-user runtime tree:
+The checkout owns the installers for its own runtime content. Once it is
+present, validated, and fast-forwarded, `install.sh` delegates to them:
 
-| Runtime | Checkout trees linked leaf by leaf | Global destination trees |
-| --- | --- | --- |
-| Claude | `.claude/skills`, `.claude/agents`, `.claude/agent-resources`, `.claude/hooks`, `.claude/references` | `~/.claude/skills`, `~/.claude/agents`, `~/.claude/agent-resources`, `~/.claude/hooks`, `~/.claude/references` |
-| Codex | `.codex/skills`, `.codex/agents`, `.codex/agent-resources`, `.codex/hooks` | `~/.codex/skills`, `~/.codex/agents`, `~/.codex/agent-resources`, `~/.codex/hooks` |
-| Cursor | `.cursor/skills`, `.cursor/agents`, `.cursor/agent-resources`, `.cursor/hooks`, `.cursor/rules` | `~/.cursor/skills`, `~/.cursor/agents`, `~/.cursor/agent-resources`, `~/.cursor/hooks`, `~/.cursor/rules` |
+```bash
+python3 -B ~/compute-ai-skills/scripts/install-codex.py  --install
+python3 -B ~/compute-ai-skills/scripts/install-claude.py --install
+```
 
-The `agents` trees contain each runtime's native agent definitions;
-`agent-resources` keeps their supporting material separately available. Linking
-the direct children instead of each whole destination tree preserves unrelated
-personal content alongside the managed skills, agents, resources, hooks,
-Claude references, and Cursor rules. All source trees are validated before any
-runtime reconciliation starts. Each destination tree root must be a real
-directory or absent; symlinked roots and non-directories are rejected before
-cleanup or linking so the installer never follows them into the checkout or a
-foreign location.
+Both are standard-library-only and share one collision-safe symlink engine in
+the checkout's `runtime_install/`, so their safety rules and exit codes match:
 
-Cleanup of names removed upstream is intentionally limited. An entry is stale
-and installer-owned only when it is a destination symlink whose literal target
-is the same-named path in the corresponding `~/compute-ai-skills` source tree
-and that source no longer exists. The installer moves only those links into its
-private timestamped backup tree. It does not sweep personal files or
-directories, symlinks to foreign targets, or other unmanaged entries. A
-same-name collision with a source that still exists follows the standard
-recoverable backup-and-link path.
+| Exit | Meaning |
+| --- | --- |
+| `0` | every link aligned |
+| `1` | safely repairable missing or obsolete links |
+| `2` | invalid repository inventory, or any collision |
 
-Codex's checkout-owned `.codex/hooks.json` is linked to
-`~/.codex/hooks.json`. Claude's global boundary configuration remains in the
-dotfiles-owned `claude/settings.json`: it contains one command group invoking
+Exit `2` is a required failure here. The engine refuses rather than clobbers:
+a regular file, a broken symlink, or a symlink to the wrong target at a
+destination stops the run before anything is written. It also validates each
+runtime's inventory — agent definitions, their resource bundles, skills, and
+hooks — and re-verifies every link after installing. Destination parents must
+be physical directories inside the runtime home.
+
+The installers own `~/.codex/hooks.json` and the Codex HERDR hook, and prune
+the obsolete top-level `~/.codex/herdr-agent-state.sh` that earlier versions of
+this script created. `.claude/references/` is deliberately not linked: skills
+resolve `../../references/<file>.md` from their physical directory back into
+the checkout. Each boundary adapter likewise resolves its physical checkout
+path to import the shared `agent_policy` core, which is validated in place
+rather than linked.
+
+Claude is installed links-only. Its user-scoped hooks live in the
+dotfiles-owned `claude/settings.json`, which `~/.claude/settings.json` symlinks
+to, and the Claude installer resolves that symlink chain and writes through to
+the physical file. To keep this repository authoritative, `install.sh` runs
+`install-claude.py --check` first and inspects its output: a `repairable:
+settings` finding means upstream declares a hook the tracked file lacks, which
+is reported as a warning and skips the Claude install rather than editing a
+tracked file. That settings file contains one command group invoking
 `python3 "$HOME/.claude/hooks/agent-boundary.py"` for each of `PreToolUse`,
-`SubagentStart`, and `SubagentStop`.
+`SubagentStart`, and `SubagentStop`; an absent, empty, or `*` matcher on those
+groups all mean every tool and are accepted interchangeably.
 
-Cursor's global hook manifest is instead dotfiles-owned:
-[`cursor/hooks.json`](cursor/hooks.json) is linked to `~/.cursor/hooks.json`.
-The manifest is restricted to six boundary events, and every entry runs the
-literal `$HOME/.cursor/hooks/agent-boundary.py` command with `failClosed: true`:
-`subagentStart`, `preToolUse`, `beforeShellExecution`, `beforeMCPExecution`,
-`beforeReadFile`, and `subagentStop`. The invoked script comes from the linked
-checkout hook tree. Each adapter resolves its physical checkout path to import
-the shared `agent_policy` core, which remains in the checkout and is not linked
-separately.
+Cursor is not installed or configured. The checkout ships no Cursor installer
+and documents that runtime as manual-only.
 
-After installation, fully quit and reopen Cursor, and terminate and restart
-Claude Code and Codex so they reload the global runtime and hooks. In Codex,
-also inspect `/hooks` and complete any trust prompt; hook support is enabled,
-but installation does not update trusted-hook hashes.
+After installation, terminate and restart Claude Code and Codex so they reload
+the global runtime and hooks. In Codex, also inspect `/hooks` and complete any
+trust prompt; hook support is enabled, but installation does not update
+trusted-hook hashes.
 
 ## Final validation contract
 
@@ -309,7 +311,8 @@ herdr tmux nvim
 
 In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
 0.11.2, fzf >= 0.48.0, zoxide >= 0.9.0, executable release-binary and Herdr
-version probes, the Catppuccin
-plugin, the Claude/Codex Herdr hook links and SessionStart entries, the Codex
-hooks link, and exact `jira`/`confluence` user MCP definitions. Any missing
+version probes, the Catppuccin plugin, an aligned `--check` from both
+compute-ai-skills installers, the Claude/Codex Herdr hook links and
+SessionStart entries, the Codex hooks link, the three Claude boundary hook
+groups, and exact `jira`/`confluence` user MCP definitions. Any missing
 requirement makes `./install.sh` exit nonzero after printing its full summary.
