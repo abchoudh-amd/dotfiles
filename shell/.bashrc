@@ -141,10 +141,10 @@ export NVM_DIR="$HOME/.nvm"
 [ -f ~/.config/secrets.env ] && . ~/.config/secrets.env
 
 export ANTHROPIC_API_KEY="dummy"
-export ANTHROPIC_BASE_URL="https://llm-api.amd.com/Anthropic"
+export ANTHROPIC_BASE_URL="https://llm-api.amd.com/Unified"
 export ANTHROPIC_CUSTOM_HEADERS="Ocp-Apim-Subscription-Key: ${LLM_GATEWAY_KEY}"
 export ANTHROPIC_MODEL="Claude-Opus-5[1m]"
-export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"
+export ANTHROPIC_DEFAULT_FABLE_MODEL="gpt-5.6-sol"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="Claude-Opus-5[1m]"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="Claude-Sonnet-5"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="Claude-Haiku-4.5"
