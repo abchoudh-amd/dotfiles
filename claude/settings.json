@@ -13,8 +13,8 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\"",
-            "type": "command"
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\""
           }
         ]
       },
@@ -44,15 +44,6 @@
             "command": "~/.claude/hooks/rocprofiler-compute-precommit.sh"
           }
         ]
-      },
-      {
-        "matcher": "ExitPlanMode|Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/grill-me-gate.sh"
-          }
-        ]
       }
     ],
     "SessionStart": [
@@ -72,8 +63,7 @@
             "command": "bash \"$HOME/.claude/hooks/herdr-agent-state.sh\" session",
             "timeout": 10
           }
-        ],
-        "matcher": "*"
+        ]
       }
     ],
     "SubagentStart": [
@@ -81,8 +71,8 @@
         "matcher": "*",
         "hooks": [
           {
-            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\"",
-            "type": "command"
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\""
           }
         ]
       }
@@ -91,18 +81,8 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\"",
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
             "type": "command",
-            "command": "~/.claude/hooks/grill-me-reset.sh"
+            "command": "python3 \"$HOME/.claude/hooks/agent-boundary.py\""
           }
         ]
       }
@@ -118,5 +98,11 @@
   "voice": {
     "enabled": true,
     "mode": "tap"
-  }
+  },
+  "showThinkingSummaries": false,
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "custom:snazzy-light",
+  "editorMode": "normal",
+  "autoCompactEnabled": true,
+  "speed": "fast"
 }
