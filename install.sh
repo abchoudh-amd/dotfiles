@@ -1314,13 +1314,24 @@ compute_runtime_sources_are_valid() {
         info "required compute-ai-skills Codex hooks missing: $COMPUTE_SKILLS/.codex/hooks.json" >&2
         return 1
     }
+    # Cursor's manifest is validated by its installer but deliberately never
+    # linked, so it must exist here even though nothing points at it.
+    [[ -f "$COMPUTE_SKILLS/.cursor/hooks.json" ]] || {
+        info "required compute-ai-skills Cursor hooks missing: $COMPUTE_SKILLS/.cursor/hooks.json" >&2
+        return 1
+    }
     for required_file in \
         "$COMPUTE_SKILLS/.claude/hooks/agent-boundary.py" \
+        "$COMPUTE_SKILLS/.claude/hooks/commit-attribution-guard.sh" \
         "$COMPUTE_SKILLS/.codex/hooks/agent-boundary.py" \
+        "$COMPUTE_SKILLS/.codex/hooks/commit-attribution-guard.sh" \
+        "$COMPUTE_SKILLS/.cursor/hooks/agent-boundary.py" \
+        "$COMPUTE_SKILLS/.cursor/hooks/commit-attribution-guard.sh" \
         "$COMPUTE_SKILLS/agent_policy/core.py" \
         "$COMPUTE_SKILLS/runtime_install/core.py" \
         "$COMPUTE_SKILLS/scripts/install-claude.py" \
-        "$COMPUTE_SKILLS/scripts/install-codex.py"; do
+        "$COMPUTE_SKILLS/scripts/install-codex.py" \
+        "$COMPUTE_SKILLS/scripts/install-cursor.py"; do
         if [[ ! -f "$required_file" ]]; then
             info "required compute-ai-skills boundary source missing: $required_file" >&2
             return 1
@@ -1382,6 +1393,18 @@ install_compute_skills() {
     case $? in
         0|1) ;;
         *) info "Codex runtime install refused an unsafe collision" >&2; return 1 ;;
+    esac
+
+    # Cursor follows the Codex contract, not the Claude one: the checkout owns
+    # every ~/.cursor link and writes no personal configuration file, so there
+    # is no settings drift to gate on and no tracked file to protect. It runs
+    # before the Claude gate because that gate returns early on drift. Its
+    # .cursor/hooks.json stays unlinked by design: those hook commands are
+    # project-relative and would not resolve from a personal ~/.cursor.
+    compute_installer_run install-cursor.py --install
+    case $? in
+        0|1) ;;
+        *) info "Cursor runtime install refused an unsafe collision" >&2; return 1 ;;
     esac
 
     # Claude is installed links-only. Its settings hooks live in the tracked
@@ -1540,10 +1563,21 @@ validate_required_commands() {
     if ! compute_installer_run install-codex.py --check >/dev/null 2>&1; then
         fail "compute-ai-skills Codex runtime not aligned; run install-codex.py --check"
     fi
+    if ! compute_installer_run install-cursor.py --check >/dev/null 2>&1; then
+        fail "compute-ai-skills Cursor runtime not aligned; run install-cursor.py --check"
+    fi
     if [[ ! -L "$HOME/.codex/hooks.json" ]] ||
        [[ "$(readlink "$HOME/.codex/hooks.json" 2>/dev/null)" != \
           "$COMPUTE_SKILLS/.codex/hooks.json" ]]; then
         fail "Codex hooks.json link missing or invalid"
+    fi
+    # The inverse assertion for Cursor. Its hook commands are project-relative,
+    # so linking the checkout manifest into ~/.cursor would name paths that do
+    # not resolve. An absent file or a hand-merged regular file both pass.
+    if [[ -L "$HOME/.cursor/hooks.json" ]] &&
+       [[ "$(readlink "$HOME/.cursor/hooks.json" 2>/dev/null)" == \
+          "$COMPUTE_SKILLS/.cursor/hooks.json" ]]; then
+        fail "Cursor hooks.json must be merged by hand, not linked"
     fi
     if ! herdr_hook_is_valid \
         "$HOME/.claude/hooks/herdr-agent-state.sh" \
@@ -1589,7 +1623,8 @@ print_summary() {
     info "post-install: authenticate gh/Claude/Codex/Jira as needed"
     info "post-install: run 'claude mcp login jira' as needed"
     info "post-install: run 'claude mcp login confluence' as needed"
-    info "post-install: review Codex hooks with /hooks, then restart Claude and Codex"
+    info "post-install: review Codex hooks with /hooks, then restart Claude, Codex, and Cursor"
+    info "post-install: merge $COMPUTE_SKILLS/.cursor/hooks.json into ~/.cursor/hooks.json by hand"
     info "open a new shell after installation"
 }
 
@@ -1652,7 +1687,7 @@ main() {
     section "tmux plugins"
     attempt "install TPM and Catppuccin" install_tmux_plugins
 
-    section "Claude and Codex runtime content"
+    section "Claude, Codex, and Cursor runtime content"
     attempt "install compute-ai-skills" install_compute_skills
 
     section "Final validation"

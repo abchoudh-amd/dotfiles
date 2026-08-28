@@ -235,7 +235,7 @@ belong in tracked files.
 
 The installer activates
 [abchoudh-amd/compute-ai-skills](https://github.com/abchoudh-amd/compute-ai-skills)
-globally for Claude and Codex from `~/compute-ai-skills`. If that path
+globally for Claude, Codex, and Cursor from `~/compute-ai-skills`. If that path
 is absent, it clones the repository's `main` branch noninteractively. An
 existing path must be a Git checkout with one of the accepted HTTPS or SSH
 origins for that repository; an unexpected origin or non-checkout is a required
@@ -252,11 +252,12 @@ present, validated, and fast-forwarded, `install.sh` delegates to them:
 
 ```bash
 python3 -B ~/compute-ai-skills/scripts/install-codex.py  --install
+python3 -B ~/compute-ai-skills/scripts/install-cursor.py --install
 python3 -B ~/compute-ai-skills/scripts/install-claude.py --install
 ```
 
-Both are standard-library-only and share one collision-safe symlink engine in
-the checkout's `runtime_install/`, so their safety rules and exit codes match:
+All three are standard-library-only and share one collision-safe symlink engine
+in the checkout's `runtime_install/`, so their safety rules and exit codes match:
 
 | Exit | Meaning |
 | --- | --- |
@@ -273,7 +274,9 @@ be physical directories inside the runtime home.
 
 The installers own `~/.codex/hooks.json` and the Codex HERDR hook, and prune
 the obsolete top-level `~/.codex/herdr-agent-state.sh` that earlier versions of
-this script created. `.claude/references/` is deliberately not linked: skills
+this script created. Cursor's `.cursor/hooks.json` is validated against the
+canonical hook inventory but deliberately not linked.
+`.claude/references/` is deliberately not linked: skills
 resolve `../../references/<file>.md` from their physical directory back into
 the checkout. Each boundary adapter likewise resolves its physical checkout
 path to import the shared `agent_policy` core, which is validated in place
@@ -291,11 +294,19 @@ tracked file. That settings file contains one command group invoking
 `SubagentStart`, and `SubagentStop`; an absent, empty, or `*` matcher on those
 groups all mean every tool and are accepted interchangeably.
 
-Cursor is not installed or configured. The checkout ships no Cursor installer
-and documents that runtime as manual-only.
+Cursor is installed links-only, on the Codex contract rather than the Claude
+one. `install-cursor.py` links every skill, the eleven controlled agent
+definitions with their resource bundles, `agent-boundary.py`,
+`commit-attribution-guard.sh`, and every `.mdc` rule into `~/.cursor`, creating
+missing parents at mode `0700`. It writes no personal configuration file; it
+only reports whether `~/.cursor/hooks.json` and `~/.cursor/mcp.json` exist.
+There is therefore no settings-drift gate for Cursor. `.cursor/hooks.json` is
+validated but not linked, because its commands are project-relative
+(`.cursor/hooks/agent-boundary.py`) and would not resolve from a personal
+`~/.cursor`; merge it by hand. The Cursor editor itself is not installed.
 
-After installation, terminate and restart Claude Code and Codex so they reload
-the global runtime and hooks. In Codex, also inspect `/hooks` and complete any
+After installation, terminate and restart Claude Code, Codex, and Cursor so they
+reload the global runtime and hooks. In Codex, also inspect `/hooks` and complete any
 trust prompt; hook support is enabled, but installation does not update
 trusted-hook hashes.
 
@@ -311,8 +322,9 @@ herdr tmux nvim
 
 In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
 0.11.2, fzf >= 0.48.0, zoxide >= 0.9.0, executable release-binary and Herdr
-version probes, the Catppuccin plugin, an aligned `--check` from both
+version probes, the Catppuccin plugin, an aligned `--check` from all three
 compute-ai-skills installers, the Claude/Codex Herdr hook links and
-SessionStart entries, the Codex hooks link, the three Claude boundary hook
+SessionStart entries, the Codex hooks link, a `~/.cursor/hooks.json` that is
+not a link into the checkout, the three Claude boundary hook
 groups, and exact `jira`/`confluence` user MCP definitions. Any missing
 requirement makes `./install.sh` exit nonzero after printing its full summary.

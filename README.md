@@ -32,12 +32,13 @@ mandatory package and command inventory in [`TOOLS.md`](TOOLS.md).
 
 One run installs Rust, Go, Node/npm, uv, the required CLI/TUI tools (including
 Herdr), tmux and its plugins, and the Claude/Codex tooling before activating
-the global Claude and Codex runtime content, linking configuration, and
-validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory and
-are installed and validated separately. Cursor is neither installed nor
-configured.
+the global Claude, Codex, and Cursor runtime content, linking configuration,
+and validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory
+and are installed and validated separately. The Cursor editor itself is not
+installed; only its runtime content is activated, and only its hook manifest
+is a manual merge.
 
-The shared Claude and Codex runtime content requires
+The shared Claude, Codex, and Cursor runtime content requires
 `~/compute-ai-skills`. If it is absent, the installer clones the expected
 `abchoudh-amd/compute-ai-skills` repository. An existing checkout must have an
 accepted origin. A clean `main` checkout is updated only with
@@ -60,8 +61,8 @@ Independent phases continue after a failure so the final summary can report
 everything that needs attention. A required failure produces a nonzero exit;
 fix the reported issue and run `./install.sh` again.
 
-After a successful run, terminate and restart Claude Code and Codex so both
-reload their global runtime content and hook configuration. In Codex, review
+After a successful run, terminate and restart Claude Code, Codex, and Cursor so
+each reloads its global runtime content and hook configuration. In Codex, review
 the installed hooks with `/hooks` and complete
 any trust prompt it presents. Then open a new shell so the installed paths and
 shell initializers are active. The installer enables Codex hooks but does not
@@ -81,7 +82,7 @@ the summary requests it.
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/btop`                           |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
 
-## Global Claude and Codex runtime content
+## Global Claude, Codex, and Cursor runtime content
 
 `~/compute-ai-skills` owns the installers for its own runtime content, so this
 repository delegates to them rather than reimplementing their link engine.
@@ -89,18 +90,20 @@ After the checkout is cloned, validated, and fast-forwarded, `install.sh` runs:
 
 ```bash
 python3 -B ~/compute-ai-skills/scripts/install-codex.py  --install
+python3 -B ~/compute-ai-skills/scripts/install-cursor.py --install
 python3 -B ~/compute-ai-skills/scripts/install-claude.py --install
 ```
 
-Both share one standard-library engine in the checkout's `runtime_install/`,
-so their safety rules and exit codes are identical: `0` when every link is
-aligned, `1` for safely repairable missing or obsolete links, and `2` for an
-invalid inventory or any collision. The engine never clobbers an existing
-path — a regular file, a broken link, or a link to the wrong target makes it
-refuse and exit `2` before changing anything. Each installer also validates its
-own inventory, so a renamed or missing skill, agent, or hook fails before any
-link is written. `~/.codex/hooks.json` and the Codex HERDR hook are part of
-that inventory.
+All three share one standard-library engine in the checkout's
+`runtime_install/`, so their safety rules and exit codes are identical: `0` when
+every link is aligned, `1` for safely repairable missing or obsolete links, and
+`2` for an invalid inventory or any collision. The engine never clobbers an
+existing path — a regular file, a broken link, or a link to the wrong target
+makes it refuse and exit `2` before changing anything. Each installer also
+validates its own inventory, so a renamed or missing skill, agent, or hook fails
+before any link is written. `~/.codex/hooks.json` and the Codex HERDR hook are
+part of that inventory. Cursor's `.cursor/hooks.json` is validated but not
+linked.
 
 Claude is installed **links-only**. Its user-scoped hooks live in the tracked
 [`claude/settings.json`](claude/settings.json), which `~/.claude/settings.json`
@@ -125,17 +128,23 @@ that path from the physical directory back into the checkout's own
 checkout path before importing the shared `agent_policy` core, so that
 directory is validated in place rather than linked into any runtime.
 
-Cursor is not installed. The checkout documents it as manual-only and ships no
-Cursor installer; symlink its runtime trees and merge its hook manifest by hand
-if you want it.
+Cursor is installed **links-only**, on the Codex contract rather than the Claude
+one. `install-cursor.py` links every skill, the eleven controlled agent
+definitions with their resource bundles, `agent-boundary.py`,
+`commit-attribution-guard.sh`, and every `.mdc` rule into `~/.cursor`. It writes
+no personal configuration file at all, so there is no settings drift to gate on.
+`.cursor/hooks.json` is deliberately **not** linked: its hook commands are
+project-relative, so a personal copy would name paths that do not resolve. Merge
+it into `~/.cursor/hooks.json` by hand.
 
-Final validation re-runs both installers in `--check` mode and requires each to
-report an aligned installation. It also checks the exact Codex `hooks.json`
-link, the dotfiles-owned Claude settings link, the Claude and Codex HERDR hook
-links and their `SessionStart` entries, and all three Claude boundary hook
-groups. The two boundary adapters, the shared policy source, and both installer
-scripts must exist and be readable. Any mismatch makes the installer exit
-nonzero.
+Final validation re-runs all three installers in `--check` mode and requires
+each to report an aligned installation. It also checks the exact Codex
+`hooks.json` link, the dotfiles-owned Claude settings link, the Claude and Codex
+HERDR hook links and their `SessionStart` entries, and all three Claude boundary
+hook groups, and it refuses a `~/.cursor/hooks.json` symlinked into the
+checkout. The three boundary adapters, the three attribution guards, the shared
+policy source, and all three installer scripts must exist and be readable. Any
+mismatch makes the installer exit nonzero.
 
 ## Herdr agent integration
 
