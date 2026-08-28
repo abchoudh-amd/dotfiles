@@ -175,7 +175,7 @@ alias vi="nvim"
 alias vimdiff="nvim -d"
 export EDITOR="nvim"
 
-export ROCM_PATH="$HOME/rocm-nightly/gfx950"
+export ROCM_PATH="$HOME/rocm-nightly/current"
 export PATH="$ROCM_PATH/bin:$PATH"
 export LD_LIBRARY_PATH="$ROCM_PATH/lib:$ROCM_PATH/lib64:$LD_LIBRARY_PATH"
 

@@ -105,5 +105,6 @@
   "editorMode": "normal",
   "autoCompactEnabled": true,
   "teammateMode": "in-process",
-  "speed": "fast"
+  "speed": "fast",
+  "tui": "fullscreen"
 }
