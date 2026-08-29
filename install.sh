@@ -1229,13 +1229,50 @@ link_dotfiles() {
         "$DOTFILES/claude/claude-statusline|$HOME/.claude/claude-statusline"
         "$DOTFILES/claude/hooks/herdr-agent-state.sh|$HOME/.claude/hooks/herdr-agent-state.sh"
         "$DOTFILES/claude/themes/snazzy-light.json|$HOME/.claude/themes/snazzy-light.json"
-        "$DOTFILES/codex/config.toml|$HOME/.codex/config.toml"
         "$DOTFILES/tmux/.tmux.conf|$HOME/.tmux.conf"
         "$DOTFILES/tmux/.gitmux.conf|$HOME/.gitmux.conf"
     )
     for entry in "${links[@]}"; do
         attempt "link ${entry#*|}" link_path "${entry%%|*}" "${entry#*|}"
     done
+}
+
+# Codex writes its own configuration: each project it trusts and each hook hash
+# it accepts is recorded back into config.toml, keyed by absolute path. Linking
+# the tracked file into ~/.codex therefore made this checkout Codex's scratch
+# space. The live file is physical and Codex-owned; the tracked base stays
+# authoritative over it through codex/merge-config.py, which preserves every
+# table the base does not declare.
+codex_config_render() {
+    python3 -B "$DOTFILES/codex/merge-config.py" \
+        --base "$DOTFILES/codex/config.toml" \
+        --target "$HOME/.codex/config.toml" "$@"
+}
+
+install_codex_config() {
+    local live="$HOME/.codex/config.toml" preserved=""
+    mkdir -p "$(dirname "$live")" || return 1
+    if [[ -L "$live" ]]; then
+        # One-time migration off the old symlink. Read the linked content before
+        # unlinking so this host keeps the trust entries and hook hashes it has
+        # already accepted instead of re-trusting every project.
+        preserved="$(cat "$live" 2>/dev/null)" || preserved=""
+        backup_existing "$live" || return 1
+        printf '%s\n' "$preserved" > "$live" || return 1
+        chmod 0600 "$live" || return 1
+    elif [[ ! -e "$live" ]]; then
+        cp -- "$DOTFILES/codex/config.toml" "$live" || return 1
+        chmod 0600 "$live" || return 1
+    elif [[ ! -f "$live" ]]; then
+        info "Codex configuration is not a regular file: $live" >&2
+        return 1
+    fi
+    codex_config_render
+    case $? in
+        0) present "$live"; return 0 ;;
+        1) return 0 ;;
+        *) info "Codex configuration render refused" >&2; return 1 ;;
+    esac
 }
 
 seed_secrets() {
@@ -1628,6 +1665,16 @@ validate_required_commands() {
             fail "Cursor Slurm add-on not aligned; run install-slurm.py --runtime cursor --check"
         fi
     fi
+    # ~/.codex/config.toml is Codex's own writable file, rendered from the
+    # tracked base. A symlink there would put machine-local trust and hook state
+    # back into this repository.
+    if [[ ! -e "$HOME/.codex/config.toml" ]]; then
+        fail "Codex configuration missing"
+    elif [[ -L "$HOME/.codex/config.toml" ]]; then
+        fail "Codex configuration must be a rendered physical file, not a link"
+    elif ! codex_config_render --check >/dev/null 2>&1; then
+        fail "Codex configuration not aligned; run codex/merge-config.py --check"
+    fi
     # ~/.codex/hooks.json must be the physical merged file the Codex installer
     # maintains, so the optional Slurm fragment can be merged into it. A symlink
     # into the checkout is the obsolete layout that installer now replaces.
@@ -1749,6 +1796,7 @@ main() {
 
     section "Configuration and secrets"
     link_dotfiles
+    attempt "render Codex configuration" install_codex_config
     attempt "seed and link secrets" seed_secrets
 
     section "tmux plugins"

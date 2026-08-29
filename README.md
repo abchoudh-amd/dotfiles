@@ -78,9 +78,34 @@ the summary requests it.
 | Prompt          | `config/starship.toml`                                                |
 | Herdr           | `config/herdr/config.toml` -> `~/.config/herdr/config.toml`           |
 | Claude Code     | settings, status line, theme, and `claude/mcp-servers.json`           |
-| Codex           | `codex/config.toml` (key read from `$LLM_GATEWAY_KEY` at runtime)     |
+| Codex           | `codex/config.toml`, rendered not linked (key read from `$LLM_GATEWAY_KEY`) |
 | Editors / TUI   | `config/nvim`, `config/fish`, `config/btop`                           |
 | tmux            | `tmux/.tmux.conf`, `tmux/.gitmux.conf`                                |
+
+## Codex configuration
+
+Codex writes its own configuration. Every project it trusts and every hook hash
+it accepts is recorded back into `config.toml`, keyed by absolute path, so that
+state is meaningless on another host and changes constantly. `~/.codex/config.toml`
+is therefore a physical file Codex owns, not a symlink into this repository.
+
+[`codex/merge-config.py`](codex/merge-config.py) keeps the tracked settings
+authoritative over it with one rule: **the rendered file is the tracked base,
+followed by every top-level table block of the live file whose header the base
+does not define.** So `codex/config.toml` wins on everything it declares, and
+anything Codex invents — `[projects."..."]` trust entries, `[hooks.state...]`
+hashes, marketplaces, plugins, tables that do not exist yet — is preserved
+untouched. The tracked base deliberately declares none of those.
+
+`install.sh` renders on every run and migrates an older symlink at that path
+once, reading the linked content first so the host keeps the projects and hooks
+it has already trusted. Its exit codes match the runtime installers': `0`
+aligned, `1` rendered, `2` refused. Inspect a pending render without writing:
+
+```bash
+python3 -B ~/dotfiles/codex/merge-config.py \
+    --base ~/dotfiles/codex/config.toml --target ~/.codex/config.toml --check
+```
 
 ## Global Claude, Codex, and Cursor runtime content
 
@@ -168,7 +193,8 @@ self-disabling on a host without Slurm.
 Final validation re-runs all three installers in `--check` mode and requires
 each to report an aligned installation, and adds the Codex and Cursor Slurm
 `--check` runs when `DOTFILES_SLURM=1`. It also requires `~/.codex/hooks.json` to
-be present and not a symlink into the checkout, and checks
+be present and not a symlink into the checkout, an aligned and unlinked
+`~/.codex/config.toml`, and checks
 the dotfiles-owned Claude settings link, the Claude and Codex
 HERDR hook links and their `SessionStart` entries, and all three Claude boundary
 hook groups, and it refuses a `~/.cursor/hooks.json` symlinked into the

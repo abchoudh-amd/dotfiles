@@ -179,6 +179,40 @@ but does not update trusted-hook hashes.
 > Their live paths are symlinks to tracked files, and the generated installer
 > can rewrite those tracked targets. Update the pinned assets deliberately.
 
+## Codex configuration rendering
+
+`~/.codex/config.toml` is a physical file Codex owns, not a link to the tracked
+`codex/config.toml`. Codex records each trusted project and each accepted hook
+hash back into that file, keyed by absolute path, so a linked copy turned this
+repository into its scratch space and produced a diff on nearly every session.
+
+`codex/merge-config.py` renders the live file from the tracked base:
+
+```bash
+python3 -B ~/dotfiles/codex/merge-config.py \
+    --base ~/dotfiles/codex/config.toml --target ~/.codex/config.toml [--check]
+```
+
+The rendered file is the tracked base followed by every top-level table block of
+the live file whose header the base does not define. There is no allowlist: the
+base wins on every table it declares, and each table it omits survives verbatim.
+The tracked base declares the top-level settings, `[model_providers.custom-gateway]`,
+`[features]`, `[tui]`, `[tui.model_availability_nux]`, and the two
+`[mcp_servers.*]` records; it declares no `[projects."..."]`, `[hooks.state...]`,
+`[marketplaces.*]`, or `[plugins.*]` table, which is why Codex's own state
+persists across installs while staying out of Git.
+
+Both inputs and the rendered result must parse as TOML; the script refuses at
+exit `2` rather than write otherwise, and writes atomically at mode `0600`
+through a same-directory temporary file. Exit `0` means the live file already
+matched, `1` means it was rendered, or would be under `--check`.
+
+`install.sh` renders on every run. It also migrates a legacy symlink at that path
+exactly once, reading the linked content before unlinking so the host keeps the
+projects and hooks it has already trusted, and backing the link up into the same
+private timestamped tree used for other conflicts. A path that exists as neither
+a regular file nor a symlink is a step failure.
+
 ## Claude MCP configuration
 
 [`claude/mcp-servers.json`](claude/mcp-servers.json) is the tracked,
@@ -359,7 +393,8 @@ In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
 version probes, the Catppuccin plugin, an aligned `--check` from all three
 compute-ai-skills installers, the Claude/Codex Herdr hook links and
 SessionStart entries, a `~/.codex/hooks.json` that is present and not a link
-into the checkout, a `~/.cursor/hooks.json` that is
+into the checkout, a `~/.codex/config.toml` that is present, unlinked, and
+aligned with its rendered form, a `~/.cursor/hooks.json` that is
 not a link into the checkout, the three Claude boundary hook
 groups, and exact `jira`/`confluence` user MCP definitions. When
 `DOTFILES_SLURM=1`, it additionally requires an aligned `--check` from the
