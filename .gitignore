@@ -9,6 +9,9 @@ secrets/
 # tmux plugins are installed by TPM (prefix + I), not vendored
 **/.tmux/plugins/
 
+# lazy.nvim re-pins this on every plugin update; it is machine-local
+config/nvim/lazy-lock.json
+
 # State / logs / backups
 /.claude.json
 *.log
