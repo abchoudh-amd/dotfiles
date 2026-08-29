@@ -274,7 +274,12 @@ be physical directories inside the runtime home.
 
 The installers own `~/.codex/hooks.json` and the Codex HERDR hook, and prune
 the obsolete top-level `~/.codex/herdr-agent-state.sh` that earlier versions of
-this script created. Cursor's `.cursor/hooks.json` is validated against the
+this script created. `hooks.json` is owned as a physical file rather than a
+link: `install-codex.py` merges its entries into it, additively and after
+backing it up, so the optional Slurm fragment can be merged into the same file
+later. A leftover symlink from that path into the checkout is replaced with the
+merged file, because writing through it would edit the checkout.
+Cursor's `.cursor/hooks.json` is validated against the
 canonical hook inventory but deliberately not linked.
 `.claude/references/` is deliberately not linked: skills
 resolve `../../references/<file>.md` from their physical directory back into
@@ -286,7 +291,7 @@ Claude is installed links-only. Its user-scoped hooks live in the
 dotfiles-owned `claude/settings.json`, which `~/.claude/settings.json` symlinks
 to, and the Claude installer resolves that symlink chain and writes through to
 the physical file. To keep this repository authoritative, `install.sh` runs
-`install-claude.py --check` first and inspects its output: a `repairable:
+`install-claude.py --check` first and inspects its output: a `repairable: Claude
 settings` finding means upstream declares a hook the tracked file lacks, which
 is reported as a warning and skips the Claude install rather than editing a
 tracked file. That settings file contains one command group invoking
@@ -295,15 +300,44 @@ tracked file. That settings file contains one command group invoking
 groups all mean every tool and are accepted interchangeably.
 
 Cursor is installed links-only, on the Codex contract rather than the Claude
-one. `install-cursor.py` links every skill, the eleven controlled agent
+one. `install-cursor.py` links every skill, the twelve controlled agent
 definitions with their resource bundles, `agent-boundary.py`,
-`commit-attribution-guard.sh`, and every `.mdc` rule into `~/.cursor`, creating
+`commit-attribution-guard.sh`, and every `.mdc` rule except the Slurm one into
+`~/.cursor`, creating
 missing parents at mode `0700`. It writes no personal configuration file; it
 only reports whether `~/.cursor/hooks.json` and `~/.cursor/mcp.json` exist.
 There is therefore no settings-drift gate for Cursor. `.cursor/hooks.json` is
 validated but not linked, because its commands are project-relative
 (`.cursor/hooks/agent-boundary.py`) and would not resolve from a personal
 `~/.cursor`; merge it by hand. The Cursor editor itself is not installed.
+
+## Slurm add-on activation
+
+Slurm is opt-in. The base installers place no Slurm hook, skill, or rule, and
+the tracked `claude/settings.json` wires none. `install.sh` installs the add-on
+only when `DOTFILES_SLURM=1` is set in its environment, using the checkout's
+`scripts/install-slurm.py`, which runs on the same engine and returns the same
+exit codes as the base installers:
+
+```bash
+python3 -B ~/compute-ai-skills/scripts/install-slurm.py --runtime codex  --install
+python3 -B ~/compute-ai-skills/scripts/install-slurm.py --runtime cursor --install
+```
+
+Codex receives `slurm-bootstrap.sh`, `slurm-mountcheck.sh`, the `_shared`
+detection helper, the `slurm` skill, and two hook entries merged into the
+physical `~/.codex/hooks.json`. Cursor receives the `slurm` and
+`slurm-cloud-agent` skills and the always-apply `slurm-always.mdc` rule; it has
+no Slurm hook. Claude is gated the same way its base install is: the add-on's
+two hook entries belong in the tracked `claude/settings.json`, so `install.sh`
+runs `install-slurm.py --runtime claude --check`, reports a `repairable: Claude
+Slurm settings` finding as a warning, and skips rather than writing through
+`~/.claude/settings.json` into this repository. Reconcile it by merging
+`~/compute-ai-skills/.claude/settings.slurm.json` into `claude/settings.json`
+with the `$CLAUDE_PROJECT_DIR/.claude/` prefix replaced by `$HOME/.claude/`,
+then re-run. Removal is manual: the upstream merge is additive by contract and
+removes nothing. The hooks exit silently unless the cached detection state is
+`available`, so an installed add-on on a non-Slurm host is inert.
 
 After installation, terminate and restart Claude Code, Codex, and Cursor so they
 reload the global runtime and hooks. In Codex, also inspect `/hooks` and complete any
@@ -324,7 +358,11 @@ In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
 0.11.2, fzf >= 0.48.0, zoxide >= 0.9.0, executable release-binary and Herdr
 version probes, the Catppuccin plugin, an aligned `--check` from all three
 compute-ai-skills installers, the Claude/Codex Herdr hook links and
-SessionStart entries, the Codex hooks link, a `~/.cursor/hooks.json` that is
+SessionStart entries, a `~/.codex/hooks.json` that is present and not a link
+into the checkout, a `~/.cursor/hooks.json` that is
 not a link into the checkout, the three Claude boundary hook
-groups, and exact `jira`/`confluence` user MCP definitions. Any missing
+groups, and exact `jira`/`confluence` user MCP definitions. When
+`DOTFILES_SLURM=1`, it additionally requires an aligned `--check` from the
+Codex and Cursor Slurm add-on installs; the Claude add-on has no gate, because
+its hook entries are a deliberate manual reconcile. Any missing
 requirement makes `./install.sh` exit nonzero after printing its full summary.

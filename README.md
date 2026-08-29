@@ -101,9 +101,12 @@ every link is aligned, `1` for safely repairable missing or obsolete links, and
 existing path — a regular file, a broken link, or a link to the wrong target
 makes it refuse and exit `2` before changing anything. Each installer also
 validates its own inventory, so a renamed or missing skill, agent, or hook fails
-before any link is written. `~/.codex/hooks.json` and the Codex HERDR hook are
-part of that inventory. Cursor's `.cursor/hooks.json` is validated but not
-linked.
+before any link is written. The Codex HERDR hook is part of that inventory.
+`~/.codex/hooks.json` is not a link: the Codex installer maintains it as a
+physical file it merges its hook entries into, so the optional Slurm fragment
+can be merged into the same file later. An older symlink from that path into the
+checkout is replaced with the merged file, because writing through it would edit
+the checkout. Cursor's `.cursor/hooks.json` is validated but not linked.
 
 Claude is installed **links-only**. Its user-scoped hooks live in the tracked
 [`claude/settings.json`](claude/settings.json), which `~/.claude/settings.json`
@@ -129,17 +132,44 @@ checkout path before importing the shared `agent_policy` core, so that
 directory is validated in place rather than linked into any runtime.
 
 Cursor is installed **links-only**, on the Codex contract rather than the Claude
-one. `install-cursor.py` links every skill, the eleven controlled agent
+one. `install-cursor.py` links every skill, the twelve controlled agent
 definitions with their resource bundles, `agent-boundary.py`,
-`commit-attribution-guard.sh`, and every `.mdc` rule into `~/.cursor`. It writes
+`commit-attribution-guard.sh`, and every `.mdc` rule except the Slurm one into
+`~/.cursor`. It writes
 no personal configuration file at all, so there is no settings drift to gate on.
 `.cursor/hooks.json` is deliberately **not** linked: its hook commands are
 project-relative, so a personal copy would name paths that do not resolve. Merge
 it into `~/.cursor/hooks.json` by hand.
 
+### Slurm add-on
+
+Slurm is opt-in upstream and opt-in here. No base installer places a Slurm hook,
+skill, or rule, and the tracked `claude/settings.json` wires none, so a host
+without Slurm carries none of it. Set `DOTFILES_SLURM=1` to install the add-on on
+top of the base runtime content:
+
+```bash
+DOTFILES_SLURM=1 ./install.sh
+```
+
+That runs `install-slurm.py --runtime codex --install` and
+`--runtime cursor --install`, which link the Slurm hooks, the `slurm` skill,
+Cursor's `slurm-cloud-agent` skill, and its always-apply `slurm-always.mdc` rule,
+and merge the Codex hook entries into the physical `~/.codex/hooks.json`. Claude
+keeps the base Claude contract: its Slurm hook entries would have to be written
+into the tracked `claude/settings.json`, so the run reports the drift and skips
+instead. To wire Claude, merge
+`~/compute-ai-skills/.claude/settings.slurm.json` into `claude/settings.json` by
+hand, replacing the `$CLAUDE_PROJECT_DIR/.claude/` prefix with `$HOME/.claude/`,
+commit it, and re-run. Removal is manual on both sides: the upstream merge is
+additive by contract, so delete the entries and links yourself. The hooks are
+self-disabling on a host without Slurm.
+
 Final validation re-runs all three installers in `--check` mode and requires
-each to report an aligned installation. It also checks the exact Codex
-`hooks.json` link, the dotfiles-owned Claude settings link, the Claude and Codex
+each to report an aligned installation, and adds the Codex and Cursor Slurm
+`--check` runs when `DOTFILES_SLURM=1`. It also requires `~/.codex/hooks.json` to
+be present and not a symlink into the checkout, and checks
+the dotfiles-owned Claude settings link, the Claude and Codex
 HERDR hook links and their `SessionStart` entries, and all three Claude boundary
 hook groups, and it refuses a `~/.cursor/hooks.json` symlinked into the
 checkout. The three boundary adapters, the three attribution guards, the shared
@@ -263,7 +293,9 @@ claude mcp login confluence
 
 ## Not included
 
-- ROCm or Slurm installation and cluster configuration.
+- ROCm or Slurm installation and cluster configuration. Only the agent-side
+  Slurm runtime content is available, and only on request; see
+  [the Slurm add-on](#slurm-add-on).
 - Desktop/GUI assets.
 - Authentication or secret values. Existing credentials may be preserved or
   seeded, but the installer does not supply real values or perform logins.

@@ -1386,9 +1386,13 @@ install_compute_skills() {
     fi
     compute_runtime_sources_are_valid || return 1
 
-    # The Codex installer owns every ~/.codex runtime link, including
-    # hooks.json and the HERDR hook, and prunes the obsolete top-level
-    # ~/.codex/herdr-agent-state.sh that earlier versions of this script made.
+    # The Codex installer owns every ~/.codex runtime link, including the HERDR
+    # hook, and prunes the obsolete top-level ~/.codex/herdr-agent-state.sh that
+    # earlier versions of this script made. It also owns ~/.codex/hooks.json,
+    # which is a physical file it merges into rather than a link: the optional
+    # Slurm fragment is merged into the same file later. A leftover symlink into
+    # the checkout is replaced with that physical merged file, because writing
+    # through it would edit the checkout.
     compute_installer_run install-codex.py --install
     case $? in
         0|1) ;;
@@ -1417,7 +1421,7 @@ install_compute_skills() {
         0|1) ;;
         *) info "Claude runtime check refused an unsafe collision" >&2; return 1 ;;
     esac
-    if grep -q '^repairable: settings' <<< "$claude_check"; then
+    if grep -q '^repairable: Claude settings' <<< "$claude_check"; then
         warn "compute-ai-skills declares Claude hooks absent from $DOTFILES/claude/settings.json; reconcile by hand (skipping Claude install)"
         return 0
     fi
@@ -1425,6 +1429,56 @@ install_compute_skills() {
     case $? in
         0|1) return 0 ;;
         *) info "Claude runtime install refused an unsafe collision" >&2; return 1 ;;
+    esac
+}
+
+# Slurm is an opt-in add-on upstream: no base installer places a Slurm hook,
+# skill, or rule, so a host without Slurm carries none of it. This repository
+# keeps that property and installs the add-on only when DOTFILES_SLURM=1.
+compute_slurm_requested() {
+    [[ "${DOTFILES_SLURM:-0}" == 1 ]]
+}
+
+install_compute_slurm() {
+    local runtime claude_check
+    if ! compute_slurm_requested; then
+        present "Slurm add-on not requested (set DOTFILES_SLURM=1 to install it)"
+        return 0
+    fi
+    compute_runtime_sources_are_valid || return 1
+    [[ -f "$COMPUTE_SKILLS/scripts/install-slurm.py" ]] || {
+        info "required compute-ai-skills Slurm installer missing: $COMPUTE_SKILLS/scripts/install-slurm.py" >&2
+        return 1
+    }
+
+    # Codex merges its Slurm hook entries into the physical ~/.codex/hooks.json,
+    # and Cursor is links-only with an always-apply rule. Neither touches a
+    # tracked file, so both can install unattended.
+    for runtime in codex cursor; do
+        compute_installer_run install-slurm.py --runtime "$runtime" --install
+        case $? in
+            0|1) ;;
+            *) info "$runtime Slurm install refused an unsafe collision" >&2; return 1 ;;
+        esac
+    done
+
+    # Claude follows the base Claude contract: its hook entries live in the
+    # tracked claude/settings.json, so a merge would write through
+    # ~/.claude/settings.json into this repository. Report the drift and let a
+    # human reconcile it instead.
+    claude_check="$(compute_installer_run install-slurm.py --runtime claude --check 2>&1)"
+    case $? in
+        0|1) ;;
+        *) info "Claude Slurm check refused an unsafe collision" >&2; return 1 ;;
+    esac
+    if grep -q '^repairable: Claude Slurm settings' <<< "$claude_check"; then
+        warn "Claude Slurm hooks are absent from $DOTFILES/claude/settings.json; merge $COMPUTE_SKILLS/.claude/settings.slurm.json by hand, replacing \$CLAUDE_PROJECT_DIR/.claude/ with \$HOME/.claude/, then re-run (skipping Claude Slurm install)"
+        return 0
+    fi
+    compute_installer_run install-slurm.py --runtime claude --install
+    case $? in
+        0|1) return 0 ;;
+        *) info "Claude Slurm install refused an unsafe collision" >&2; return 1 ;;
     esac
 }
 
@@ -1566,10 +1620,23 @@ validate_required_commands() {
     if ! compute_installer_run install-cursor.py --check >/dev/null 2>&1; then
         fail "compute-ai-skills Cursor runtime not aligned; run install-cursor.py --check"
     fi
-    if [[ ! -L "$HOME/.codex/hooks.json" ]] ||
-       [[ "$(readlink "$HOME/.codex/hooks.json" 2>/dev/null)" != \
-          "$COMPUTE_SKILLS/.codex/hooks.json" ]]; then
-        fail "Codex hooks.json link missing or invalid"
+    if compute_slurm_requested; then
+        if ! compute_installer_run install-slurm.py --runtime codex --check >/dev/null 2>&1; then
+            fail "Codex Slurm add-on not aligned; run install-slurm.py --runtime codex --check"
+        fi
+        if ! compute_installer_run install-slurm.py --runtime cursor --check >/dev/null 2>&1; then
+            fail "Cursor Slurm add-on not aligned; run install-slurm.py --runtime cursor --check"
+        fi
+    fi
+    # ~/.codex/hooks.json must be the physical merged file the Codex installer
+    # maintains, so the optional Slurm fragment can be merged into it. A symlink
+    # into the checkout is the obsolete layout that installer now replaces.
+    if [[ ! -e "$HOME/.codex/hooks.json" ]]; then
+        fail "Codex hooks.json missing"
+    elif [[ -L "$HOME/.codex/hooks.json" ]] &&
+         [[ "$(readlink "$HOME/.codex/hooks.json" 2>/dev/null)" == \
+            "$COMPUTE_SKILLS/.codex/hooks.json" ]]; then
+        fail "Codex hooks.json must be a physical merged file, not a checkout link"
     fi
     # The inverse assertion for Cursor. Its hook commands are project-relative,
     # so linking the checkout manifest into ~/.cursor would name paths that do
@@ -1689,6 +1756,7 @@ main() {
 
     section "Claude, Codex, and Cursor runtime content"
     attempt "install compute-ai-skills" install_compute_skills
+    attempt "install compute-ai-skills Slurm add-on" install_compute_slurm
 
     section "Final validation"
     validate_required_commands
