@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "subagentStart": [
+      {
+        "command": "$HOME/.cursor/hooks/agent-boundary.py",
+        "failClosed": true
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "$HOME/.cursor/hooks/agent-boundary.py",
+        "failClosed": true
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "$HOME/.cursor/hooks/agent-boundary.py",
+        "failClosed": true
+      },
+      {
+        "command": "$HOME/.cursor/hooks/commit-attribution-guard.sh",
+        "failClosed": false
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "$HOME/.cursor/hooks/agent-boundary.py",
+        "failClosed": true
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "$HOME/.cursor/hooks/agent-boundary.py",
+        "failClosed": true
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "$HOME/.cursor/hooks/agent-boundary.py",
+        "failClosed": true
+      }
+    ]
+  }
+}

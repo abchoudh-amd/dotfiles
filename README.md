@@ -35,12 +35,11 @@ Herdr), tmux and its plugins, and the Claude/Codex tooling before activating
 the global Claude, Codex, and Cursor runtime content, linking configuration,
 and validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory
 and are installed and validated separately. The Cursor editor itself is not
-installed; only its runtime content is activated, and only its hook manifest
-is a manual merge.
+installed; only its runtime content is activated.
 
-The shared Claude, Codex, and Cursor runtime content requires
-`~/compute-ai-skills`. If it is absent, the installer clones the expected
-`abchoudh-amd/compute-ai-skills` repository. An existing checkout must have an
+The Claude and Codex runtime content requires `~/compute-ai-skills`, and the
+Cursor runtime content requires `~/cursor-ai-skills`. If either is absent, the
+installer clones the expected `abchoudh-amd` repository. An existing checkout must have an
 accepted origin. A clean `main` checkout is updated only with
 `pull --ff-only origin main`; an update failure keeps the existing checkout
 with a warning, while a dirty or non-`main` checkout is preserved without an
@@ -109,17 +108,19 @@ python3 -B ~/dotfiles/codex/merge-config.py \
 
 ## Global Claude, Codex, and Cursor runtime content
 
-`~/compute-ai-skills` owns the installers for its own runtime content, so this
+Each skills checkout owns the installers for its own runtime content, so this
 repository delegates to them rather than reimplementing their link engine.
-After the checkout is cloned, validated, and fast-forwarded, `install.sh` runs:
+Claude and Codex live in `~/compute-ai-skills`; Cursor was split out into
+`~/cursor-ai-skills`. After each checkout is cloned, validated, and
+fast-forwarded, `install.sh` runs:
 
 ```bash
 python3 -B ~/compute-ai-skills/scripts/install-codex.py  --install
-python3 -B ~/compute-ai-skills/scripts/install-cursor.py --install
+python3 -B ~/cursor-ai-skills/scripts/install-cursor.py  --install
 python3 -B ~/compute-ai-skills/scripts/install-claude.py --install
 ```
 
-All three share one standard-library engine in the checkout's
+All three share one standard-library engine in their checkout's
 `runtime_install/`, so their safety rules and exit codes are identical: `0` when
 every link is aligned, `1` for safely repairable missing or obsolete links, and
 `2` for an invalid inventory or any collision. The engine never clobbers an
@@ -131,7 +132,8 @@ before any link is written. The Codex HERDR hook is part of that inventory.
 physical file it merges its hook entries into, so the optional Slurm fragment
 can be merged into the same file later. An older symlink from that path into the
 checkout is replaced with the merged file, because writing through it would edit
-the checkout. Cursor's `.cursor/hooks.json` is validated but not linked.
+the checkout. The Cursor checkout's own `.cursor/hooks.json` is validated but not
+linked; see below.
 
 Claude is installed **links-only**. Its user-scoped hooks live in the tracked
 [`claude/settings.json`](claude/settings.json), which `~/.claude/settings.json`
@@ -160,11 +162,16 @@ Cursor is installed **links-only**, on the Codex contract rather than the Claude
 one. `install-cursor.py` links every skill, the twelve controlled agent
 definitions with their resource bundles, `agent-boundary.py`,
 `commit-attribution-guard.sh`, and every `.mdc` rule except the Slurm one into
-`~/.cursor`. It writes
-no personal configuration file at all, so there is no settings drift to gate on.
-`.cursor/hooks.json` is deliberately **not** linked: its hook commands are
-project-relative, so a personal copy would name paths that do not resolve. Merge
-it into `~/.cursor/hooks.json` by hand.
+`~/.cursor`. It writes no personal configuration file at all, so there is no
+settings drift to gate on.
+
+The checkout's own `.cursor/hooks.json` is deliberately **not** linked: its hook
+commands are project-relative, so a personal copy would name paths that do not
+resolve. The `$HOME`-rewritten copy is tracked here as
+[`cursor/hooks.json`](cursor/hooks.json) and linked to `~/.cursor/hooks.json`,
+the same way `claude/settings.json` is. It binds `agent-boundary.py`
+fail-closed on all six Cursor hook events, plus the fail-open attribution
+guard on `beforeShellExecution`.
 
 ### Slurm add-on
 
@@ -177,10 +184,12 @@ top of the base runtime content:
 DOTFILES_SLURM=1 ./install.sh
 ```
 
-That runs `install-slurm.py --runtime codex --install` and
-`--runtime cursor --install`, which link the Slurm hooks, the `slurm` skill,
-Cursor's `slurm-cloud-agent` skill, and its always-apply `slurm-always.mdc` rule,
-and merge the Codex hook entries into the physical `~/.codex/hooks.json`. Claude
+That runs `install-slurm.py --runtime codex --install` from
+`~/compute-ai-skills` and `install-slurm.py --install` from `~/cursor-ai-skills`
+(whose installer takes no `--runtime` flag, since that repository ships one
+runtime). Together they link the Slurm hooks, the `slurm` skill, Cursor's
+`slurm-cloud-agent` skill, and its always-apply `slurm-always.mdc` rule, and
+merge the Codex hook entries into the physical `~/.codex/hooks.json`. Claude
 keeps the base Claude contract: its Slurm hook entries would have to be written
 into the tracked `claude/settings.json`, so the run reports the drift and skips
 instead. To wire Claude, merge
@@ -197,9 +206,11 @@ be present and not a symlink into the checkout, an aligned and unlinked
 `~/.codex/config.toml`, and checks
 the dotfiles-owned Claude settings link, the Claude and Codex
 HERDR hook links and their `SessionStart` entries, and all three Claude boundary
-hook groups, and it refuses a `~/.cursor/hooks.json` symlinked into the
-checkout. The three boundary adapters, the three attribution guards, the shared
-policy source, and all three installer scripts must exist and be readable. Any
+hook groups. It requires `~/.cursor/hooks.json` to exist and to bind the
+boundary adapter fail-closed on all six Cursor events, and refuses one
+symlinked into the Cursor checkout. The three boundary adapters, the three
+attribution guards, both policy sources, and all three installer scripts must
+exist and be readable. Any
 mismatch makes the installer exit nonzero.
 
 ## Herdr agent integration

@@ -8,6 +8,7 @@ LOCAL_OPT="$LOCAL_PREFIX/opt"
 LOCAL_GO="$LOCAL_PREFIX/go"
 NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 COMPUTE_SKILLS="$HOME/compute-ai-skills"
+CURSOR_SKILLS="$HOME/cursor-ai-skills"
 FZF_MIN_VERSION=0.48.0
 ZOXIDE_MIN_VERSION=0.9.0
 BACKUP_DIR=""
@@ -1225,6 +1226,7 @@ link_dotfiles() {
         "$DOTFILES/config/btop/btop.conf|$HOME/.config/btop/btop.conf"
         "$DOTFILES/config/herdr/config.toml|$HOME/.config/herdr/config.toml"
         "$DOTFILES/claude/settings.json|$HOME/.claude/settings.json"
+        "$DOTFILES/cursor/hooks.json|$HOME/.cursor/hooks.json"
         "$DOTFILES/claude/statusline.sh|$HOME/.claude/statusline.sh"
         "$DOTFILES/claude/claude-statusline|$HOME/.claude/claude-statusline"
         "$DOTFILES/claude/hooks/herdr-agent-state.sh|$HOME/.claude/hooks/herdr-agent-state.sh"
@@ -1345,16 +1347,19 @@ skills_origin_is_expected() {
     esac
 }
 
+cursor_skills_origin_is_expected() {
+    local origin="$1"
+    case "$origin" in
+        https://github.com/abchoudh-amd/cursor-ai-skills|https://github.com/abchoudh-amd/cursor-ai-skills.git|\
+        git@github.com:abchoudh-amd/cursor-ai-skills.git|ssh://git@github.com/abchoudh-amd/cursor-ai-skills.git) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 compute_runtime_sources_are_valid() {
     local required_file
     [[ -f "$COMPUTE_SKILLS/.codex/hooks.json" ]] || {
         info "required compute-ai-skills Codex hooks missing: $COMPUTE_SKILLS/.codex/hooks.json" >&2
-        return 1
-    }
-    # Cursor's manifest is validated by its installer but deliberately never
-    # linked, so it must exist here even though nothing points at it.
-    [[ -f "$COMPUTE_SKILLS/.cursor/hooks.json" ]] || {
-        info "required compute-ai-skills Cursor hooks missing: $COMPUTE_SKILLS/.cursor/hooks.json" >&2
         return 1
     }
     for required_file in \
@@ -1362,13 +1367,10 @@ compute_runtime_sources_are_valid() {
         "$COMPUTE_SKILLS/.claude/hooks/commit-attribution-guard.sh" \
         "$COMPUTE_SKILLS/.codex/hooks/agent-boundary.py" \
         "$COMPUTE_SKILLS/.codex/hooks/commit-attribution-guard.sh" \
-        "$COMPUTE_SKILLS/.cursor/hooks/agent-boundary.py" \
-        "$COMPUTE_SKILLS/.cursor/hooks/commit-attribution-guard.sh" \
         "$COMPUTE_SKILLS/agent_policy/core.py" \
         "$COMPUTE_SKILLS/runtime_install/core.py" \
         "$COMPUTE_SKILLS/scripts/install-claude.py" \
-        "$COMPUTE_SKILLS/scripts/install-codex.py" \
-        "$COMPUTE_SKILLS/scripts/install-cursor.py"; do
+        "$COMPUTE_SKILLS/scripts/install-codex.py"; do
         if [[ ! -f "$required_file" ]]; then
             info "required compute-ai-skills boundary source missing: $required_file" >&2
             return 1
@@ -1387,6 +1389,79 @@ compute_installer_run() {
     local script="$1"
     shift
     python3 -B "$COMPUTE_SKILLS/scripts/$script" "$@"
+}
+
+# Cursor lives in its own checkout, so it gets its own runner. Its installers
+# take no --runtime flag: the repository ships one runtime.
+cursor_installer_run() {
+    local script="$1"
+    shift
+    python3 -B "$CURSOR_SKILLS/scripts/$script" "$@"
+}
+
+cursor_runtime_sources_are_valid() {
+    local required_file
+    # The manifest is validated by the installer but deliberately never linked
+    # into ~/.cursor from the checkout, so it must exist here even though
+    # nothing points at it.
+    [[ -f "$CURSOR_SKILLS/.cursor/hooks.json" ]] || {
+        info "required cursor-ai-skills hooks missing: $CURSOR_SKILLS/.cursor/hooks.json" >&2
+        return 1
+    }
+    for required_file in \
+        "$CURSOR_SKILLS/.cursor/hooks/agent-boundary.py" \
+        "$CURSOR_SKILLS/.cursor/hooks/commit-attribution-guard.sh" \
+        "$CURSOR_SKILLS/agent_policy/core.py" \
+        "$CURSOR_SKILLS/runtime_install/core.py" \
+        "$CURSOR_SKILLS/scripts/install-cursor.py"; do
+        if [[ ! -f "$required_file" ]]; then
+            info "required cursor-ai-skills boundary source missing: $required_file" >&2
+            return 1
+        fi
+        if [[ ! -r "$required_file" ]]; then
+            info "required cursor-ai-skills boundary source is not readable: $required_file" >&2
+            return 1
+        fi
+    done
+}
+
+install_cursor_skills() {
+    local origin branch status
+    if [[ ! -e "$CURSOR_SKILLS" && ! -L "$CURSOR_SKILLS" ]]; then
+        mkdir "$CURSOR_SKILLS" || return 1
+        if ! GIT_TERMINAL_PROMPT=0 git clone --branch main \
+            https://github.com/abchoudh-amd/cursor-ai-skills.git "$CURSOR_SKILLS"; then
+            if [[ -e "$CURSOR_SKILLS" || -L "$CURSOR_SKILLS" ]]; then
+                backup_existing "$CURSOR_SKILLS" || return 1
+            fi
+            return 1
+        fi
+    fi
+    [[ -d "$CURSOR_SKILLS/.git" ]] || return 1
+    origin="$(git -C "$CURSOR_SKILLS" remote get-url origin 2>/dev/null)" || return 1
+    cursor_skills_origin_is_expected "$origin" || return 1
+    branch="$(git -C "$CURSOR_SKILLS" branch --show-current 2>/dev/null)" || return 1
+    status="$(git -C "$CURSOR_SKILLS" status --porcelain 2>/dev/null)" || return 1
+    if [[ "$branch" == main && -z "$status" ]]; then
+        GIT_TERMINAL_PROMPT=0 git -C "$CURSOR_SKILLS" pull --ff-only origin main || \
+            warn "could not fast-forward $CURSOR_SKILLS; using the existing checkout"
+    else
+        warn "$CURSOR_SKILLS is dirty or not on main; preserving it without update"
+    fi
+    cursor_runtime_sources_are_valid || return 1
+
+    # Cursor follows the Codex contract, not the Claude one: the checkout owns
+    # every ~/.cursor link except hooks.json and writes no personal
+    # configuration file, so there is no settings drift to gate on. The
+    # checkout's own .cursor/hooks.json stays unlinked by design: those hook
+    # commands are project-relative and would not resolve from a personal
+    # ~/.cursor. The tracked cursor/hooks.json in this repository carries the
+    # $HOME-rewritten copy and is linked by link_dotfiles.
+    cursor_installer_run install-cursor.py --install
+    case $? in
+        0|1) ;;
+        *) info "Cursor runtime install refused an unsafe collision" >&2; return 1 ;;
+    esac
 }
 
 install_compute_skills() {
@@ -1436,18 +1511,6 @@ install_compute_skills() {
         *) info "Codex runtime install refused an unsafe collision" >&2; return 1 ;;
     esac
 
-    # Cursor follows the Codex contract, not the Claude one: the checkout owns
-    # every ~/.cursor link and writes no personal configuration file, so there
-    # is no settings drift to gate on and no tracked file to protect. It runs
-    # before the Claude gate because that gate returns early on drift. Its
-    # .cursor/hooks.json stays unlinked by design: those hook commands are
-    # project-relative and would not resolve from a personal ~/.cursor.
-    compute_installer_run install-cursor.py --install
-    case $? in
-        0|1) ;;
-        *) info "Cursor runtime install refused an unsafe collision" >&2; return 1 ;;
-    esac
-
     # Claude is installed links-only. Its settings hooks live in the tracked
     # claude/settings.json, which ~/.claude/settings.json symlinks to, and the
     # installer would otherwise write through that link into this repository.
@@ -1488,16 +1551,27 @@ install_compute_slurm() {
         return 1
     }
 
-    # Codex merges its Slurm hook entries into the physical ~/.codex/hooks.json,
-    # and Cursor is links-only with an always-apply rule. Neither touches a
-    # tracked file, so both can install unattended.
-    for runtime in codex cursor; do
+    # Codex merges its Slurm hook entries into the physical ~/.codex/hooks.json.
+    # It touches no tracked file, so it can install unattended.
+    for runtime in codex; do
         compute_installer_run install-slurm.py --runtime "$runtime" --install
         case $? in
             0|1) ;;
             *) info "$runtime Slurm install refused an unsafe collision" >&2; return 1 ;;
         esac
     done
+
+    # Cursor is links-only with an always-apply rule, installed from its own
+    # checkout. Its installer takes no --runtime flag.
+    if [[ -f "$CURSOR_SKILLS/scripts/install-slurm.py" ]]; then
+        cursor_installer_run install-slurm.py --install
+        case $? in
+            0|1) ;;
+            *) info "Cursor Slurm install refused an unsafe collision" >&2; return 1 ;;
+        esac
+    else
+        warn "cursor-ai-skills Slurm installer missing; skipping the Cursor Slurm add-on"
+    fi
 
     # Claude follows the base Claude contract: its hook entries live in the
     # tracked claude/settings.json, so a merge would write through
@@ -1618,6 +1692,28 @@ claude_boundary_hooks_are_exact() {
     ' "$settings" >/dev/null
 }
 
+# Cursor's manifest is flat: each event maps to a list of {command, failClosed}
+# entries, with no matcher layer. The boundary adapter must be bound fail-closed
+# on every one of the six events it handles; the attribution guard is a message
+# convention rather than a security boundary and is deliberately fail-open, so
+# it is not asserted here.
+cursor_boundary_hooks_are_exact() {
+    local manifest="$1"
+    json_document_has_unique_object_keys "$manifest" || return 1
+    jq -e --arg expected_command '$HOME/.cursor/hooks/agent-boundary.py' '
+        . as $root
+        | ["subagentStart", "preToolUse", "beforeShellExecution",
+           "beforeMCPExecution", "beforeReadFile", "subagentStop"] as $events
+        | all($events[];
+            . as $event
+            | ($root.hooks[$event] | type) == "array"
+            and ([$root.hooks[$event][]
+                  | select(.command == $expected_command and .failClosed == true)]
+                 | length) == 1
+        )
+    ' "$manifest" >/dev/null
+}
+
 validate_required_commands() {
     local command_name
     local -a commands=(
@@ -1654,15 +1750,15 @@ validate_required_commands() {
     if ! compute_installer_run install-codex.py --check >/dev/null 2>&1; then
         fail "compute-ai-skills Codex runtime not aligned; run install-codex.py --check"
     fi
-    if ! compute_installer_run install-cursor.py --check >/dev/null 2>&1; then
-        fail "compute-ai-skills Cursor runtime not aligned; run install-cursor.py --check"
+    if ! cursor_installer_run install-cursor.py --check >/dev/null 2>&1; then
+        fail "cursor-ai-skills runtime not aligned; run install-cursor.py --check"
     fi
     if compute_slurm_requested; then
         if ! compute_installer_run install-slurm.py --runtime codex --check >/dev/null 2>&1; then
             fail "Codex Slurm add-on not aligned; run install-slurm.py --runtime codex --check"
         fi
-        if ! compute_installer_run install-slurm.py --runtime cursor --check >/dev/null 2>&1; then
-            fail "Cursor Slurm add-on not aligned; run install-slurm.py --runtime cursor --check"
+        if ! cursor_installer_run install-slurm.py --check >/dev/null 2>&1; then
+            fail "Cursor Slurm add-on not aligned; run cursor-ai-skills install-slurm.py --check"
         fi
     fi
     # ~/.codex/config.toml is Codex's own writable file, rendered from the
@@ -1685,13 +1781,18 @@ validate_required_commands() {
             "$COMPUTE_SKILLS/.codex/hooks.json" ]]; then
         fail "Codex hooks.json must be a physical merged file, not a checkout link"
     fi
-    # The inverse assertion for Cursor. Its hook commands are project-relative,
-    # so linking the checkout manifest into ~/.cursor would name paths that do
-    # not resolve. An absent file or a hand-merged regular file both pass.
+    # Cursor's hook manifest is tracked here and linked, the way
+    # claude/settings.json is. Linking the checkout copy instead would name
+    # project-relative commands that do not resolve from a personal ~/.cursor.
     if [[ -L "$HOME/.cursor/hooks.json" ]] &&
        [[ "$(readlink "$HOME/.cursor/hooks.json" 2>/dev/null)" == \
-          "$COMPUTE_SKILLS/.cursor/hooks.json" ]]; then
-        fail "Cursor hooks.json must be merged by hand, not linked"
+          "$CURSOR_SKILLS/.cursor/hooks.json" ]]; then
+        fail "Cursor hooks.json must be the tracked \$HOME-rewritten copy, not a checkout link"
+    fi
+    if [[ ! -e "$HOME/.cursor/hooks.json" ]]; then
+        fail "Cursor hooks.json missing; the boundary hooks are not wired"
+    elif ! cursor_boundary_hooks_are_exact "$HOME/.cursor/hooks.json"; then
+        fail "Cursor boundary hooks missing or invalid in ~/.cursor/hooks.json"
     fi
     if ! herdr_hook_is_valid \
         "$HOME/.claude/hooks/herdr-agent-state.sh" \
@@ -1738,7 +1839,6 @@ print_summary() {
     info "post-install: run 'claude mcp login jira' as needed"
     info "post-install: run 'claude mcp login confluence' as needed"
     info "post-install: review Codex hooks with /hooks, then restart Claude, Codex, and Cursor"
-    info "post-install: merge $COMPUTE_SKILLS/.cursor/hooks.json into ~/.cursor/hooks.json by hand"
     info "open a new shell after installation"
 }
 
@@ -1804,6 +1904,7 @@ main() {
 
     section "Claude, Codex, and Cursor runtime content"
     attempt "install compute-ai-skills" install_compute_skills
+    attempt "install cursor-ai-skills" install_cursor_skills
     attempt "install compute-ai-skills Slurm add-on" install_compute_slurm
 
     section "Final validation"

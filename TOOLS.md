@@ -265,14 +265,17 @@ tokens, authorization headers, environment secrets, or client secrets in the
 manifest. No MCP credentials, secret-bearing headers, or authentication tokens
 belong in tracked files.
 
-## Global compute-ai-skills runtime activation
+## Global agent-skills runtime activation
 
 The installer activates
 [abchoudh-amd/compute-ai-skills](https://github.com/abchoudh-amd/compute-ai-skills)
-globally for Claude, Codex, and Cursor from `~/compute-ai-skills`. If that path
-is absent, it clones the repository's `main` branch noninteractively. An
+globally for Claude and Codex from `~/compute-ai-skills`, and
+[abchoudh-amd/cursor-ai-skills](https://github.com/abchoudh-amd/cursor-ai-skills)
+for Cursor from `~/cursor-ai-skills`. Cursor was split into its own repository;
+the two share no code. If either path
+is absent, it clones that repository's `main` branch noninteractively. An
 existing path must be a Git checkout with one of the accepted HTTPS or SSH
-origins for that repository; an unexpected origin or non-checkout is a required
+origins for the matching repository; an unexpected origin or non-checkout is a required
 failure. A clean checkout on `main` is updated only with
 `git pull --ff-only origin main`, pinning the update to the already verified
 remote and branch. If that fast-forward cannot be completed, the existing
@@ -281,12 +284,12 @@ another branch is preserved without any update. Partial material left by a
 failed first clone is moved recoverably into the private timestamped backup
 tree.
 
-The checkout owns the installers for its own runtime content. Once it is
+Each checkout owns the installers for its own runtime content. Once it is
 present, validated, and fast-forwarded, `install.sh` delegates to them:
 
 ```bash
 python3 -B ~/compute-ai-skills/scripts/install-codex.py  --install
-python3 -B ~/compute-ai-skills/scripts/install-cursor.py --install
+python3 -B ~/cursor-ai-skills/scripts/install-cursor.py  --install
 python3 -B ~/compute-ai-skills/scripts/install-claude.py --install
 ```
 
@@ -313,8 +316,9 @@ link: `install-codex.py` merges its entries into it, additively and after
 backing it up, so the optional Slurm fragment can be merged into the same file
 later. A leftover symlink from that path into the checkout is replaced with the
 merged file, because writing through it would edit the checkout.
-Cursor's `.cursor/hooks.json` is validated against the
-canonical hook inventory but deliberately not linked.
+The Cursor checkout's own `.cursor/hooks.json` is validated against the
+canonical hook inventory but deliberately not linked; the tracked
+`cursor/hooks.json` in this repository is linked in its place.
 `.claude/references/` is deliberately not linked: skills
 resolve `../../references/<file>.md` from their physical directory back into
 the checkout. Each boundary adapter likewise resolves its physical checkout
@@ -340,10 +344,19 @@ definitions with their resource bundles, `agent-boundary.py`,
 `~/.cursor`, creating
 missing parents at mode `0700`. It writes no personal configuration file; it
 only reports whether `~/.cursor/hooks.json` and `~/.cursor/mcp.json` exist.
-There is therefore no settings-drift gate for Cursor. `.cursor/hooks.json` is
-validated but not linked, because its commands are project-relative
-(`.cursor/hooks/agent-boundary.py`) and would not resolve from a personal
-`~/.cursor`; merge it by hand. The Cursor editor itself is not installed.
+There is therefore no settings-drift gate for Cursor.
+
+The checkout's `.cursor/hooks.json` is validated but not linked, because its
+commands are project-relative (`.cursor/hooks/agent-boundary.py`) and would not
+resolve from a personal `~/.cursor`. The `$HOME`-rewritten copy is tracked here
+as `cursor/hooks.json` and linked to `~/.cursor/hooks.json` by
+`link_dotfiles`, mirroring `claude/settings.json`. Final validation requires it
+to bind `$HOME/.cursor/hooks/agent-boundary.py` with `failClosed: true` on
+`subagentStart`, `preToolUse`, `beforeShellExecution`, `beforeMCPExecution`,
+`beforeReadFile`, and `subagentStop`. The fail-open
+`commit-attribution-guard.sh` entry on `beforeShellExecution` is a message
+convention rather than a security boundary and is not asserted. The Cursor
+editor itself is not installed.
 
 ## Slurm add-on activation
 
@@ -354,9 +367,11 @@ only when `DOTFILES_SLURM=1` is set in its environment, using the checkout's
 exit codes as the base installers:
 
 ```bash
-python3 -B ~/compute-ai-skills/scripts/install-slurm.py --runtime codex  --install
-python3 -B ~/compute-ai-skills/scripts/install-slurm.py --runtime cursor --install
+python3 -B ~/compute-ai-skills/scripts/install-slurm.py --runtime codex --install
+python3 -B ~/cursor-ai-skills/scripts/install-slurm.py --install
 ```
+
+The Cursor add-on takes no `--runtime` flag: its repository ships one runtime.
 
 Codex receives `slurm-bootstrap.sh`, `slurm-mountcheck.sh`, the `_shared`
 detection helper, the `slurm` skill, and two hook entries merged into the
