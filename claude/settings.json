@@ -89,7 +89,7 @@
     "pyright-lsp@claude-plugins-official": true,
     "clangd-lsp@claude-plugins-official": true
   },
-  "ultracode": false,
+  "ultracode": true,
   "fastMode": false,
   "tui": "fullscreen",
   "voice": {
