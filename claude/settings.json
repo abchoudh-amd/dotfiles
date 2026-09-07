@@ -2,12 +2,13 @@
   "env": {
     "CLAUDE_CODE_EFFORT_LEVEL": "max",
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1050000"
+    "ENABLE_LSP_TOOL": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "786432"
   },
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "model": "fable",
+  "model": "deepseek-v4-pro[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -84,18 +85,24 @@
     "type": "command",
     "command": "~/.claude/claude-statusline"
   },
-  "alwaysThinkingEnabled": true,
-  "ultracode": true,
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true
+  },
+  "ultracode": false,
+  "fastMode": false,
+  "tui": "fullscreen",
   "voice": {
     "enabled": true,
     "mode": "tap"
   },
-  "showThinkingSummaries": false,
+  "showThinkingSummaries": true,
   "skipDangerousModePermissionPrompt": true,
   "theme": "custom:snazzy-light",
   "editorMode": "normal",
   "autoCompactEnabled": true,
   "teammateMode": "in-process",
-  "speed": "fast",
-  "tui": "fullscreen"
+  "thinking": {
+    "type": "adaptive"
+  }
 }
