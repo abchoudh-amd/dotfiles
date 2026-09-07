@@ -9,6 +9,7 @@ LOCAL_GO="$LOCAL_PREFIX/go"
 NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 COMPUTE_SKILLS="$HOME/compute-ai-skills"
 CURSOR_SKILLS="$HOME/cursor-ai-skills"
+PYTHON_MIN_VERSION=3.11
 FZF_MIN_VERSION=0.48.0
 ZOXIDE_MIN_VERSION=0.9.0
 BACKUP_DIR=""
@@ -439,6 +440,40 @@ install_uv() {
     download https://astral.sh/uv/install.sh "$script" || return 1
     UV_INSTALL_DIR="$LOCAL_BIN" UV_NO_MODIFY_PATH=1 sh "$script" || return 1
     have uv
+}
+
+# Every agent-runtime script this installer drives - codex/merge-config.py, the
+# compute-ai-skills installers, and the agent-boundary hook they register -
+# imports tomllib, which arrived in CPython 3.11. The hooks are registered as a
+# bare `python3 ...` command, so the interpreter first on PATH has to satisfy
+# that when the agents run, not only here. Distributions still shipping an older
+# python3 therefore get a modern uv-managed interpreter linked into ~/.local/bin,
+# which every shell profile in this repository already prepends; the
+# distribution interpreter stays reachable under its own versioned name.
+python_supports_tomllib() {
+    [[ -n "${1:-}" ]] || return 1
+    "$1" -c 'import tomllib' >/dev/null 2>&1
+}
+
+install_python() {
+    local interpreter
+    if python_supports_tomllib "$(command -v python3 || true)"; then
+        present "python3 $PYTHON_MIN_VERSION+"
+        return 0
+    fi
+    have uv || {
+        info "uv is required to provide python3 $PYTHON_MIN_VERSION+" >&2
+        return 1
+    }
+    interpreter="$(uv python find ">=$PYTHON_MIN_VERSION" 2>/dev/null)" || interpreter=""
+    if ! python_supports_tomllib "$interpreter"; then
+        uv python install "$PYTHON_MIN_VERSION" || return 1
+        interpreter="$(uv python find ">=$PYTHON_MIN_VERSION" 2>/dev/null)" || return 1
+        python_supports_tomllib "$interpreter" || return 1
+    fi
+    link_path "$interpreter" "$LOCAL_BIN/python3" || return 1
+    hash -r
+    python_supports_tomllib "$(command -v python3 || true)"
 }
 
 install_cargo_tool() {
@@ -1723,6 +1758,9 @@ validate_required_commands() {
     for command_name in "${commands[@]}"; do
         have "$command_name" || fail "required command missing: $command_name"
     done
+    if have python3 && ! python_supports_tomllib "$(command -v python3)"; then
+        fail "python3 $PYTHON_MIN_VERSION+ required (tomllib) for the agent runtime scripts"
+    fi
     if have tmux && ! version_ge "$(tmux_version)" 3.2; then
         fail "tmux 3.2+ required"
     fi
@@ -1862,6 +1900,7 @@ main() {
     activate_nvm || true
     export PATH="$LOCAL_BIN:$LOCAL_GO/bin:$HOME/.cargo/bin:$NVM_DIR/current/bin:$PATH"
     attempt "install uv" install_uv
+    attempt "provide python3 $PYTHON_MIN_VERSION+" install_python
 
     section "Cargo tools"
     attempt "install eza" install_cargo_tool eza eza
