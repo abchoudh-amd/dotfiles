@@ -37,6 +37,16 @@ and validating the result. Both Yazi commands, `yazi` and `ya`, are mandatory
 and are installed and validated separately. The Cursor editor itself is not
 installed; only its runtime content is activated.
 
+Python 3.11 or newer is required, because every agent-runtime script the
+installer drives - `codex/merge-config.py`, the `compute-ai-skills` installers,
+and the `agent-boundary.py` hook they register - imports `tomllib`. The hook is
+registered as a bare `python3 ...` command, so the requirement applies whenever
+the agents run, not only during installation. A distribution `python3` that
+already satisfies it is retained. Otherwise the installer links a uv-managed
+interpreter to `~/.local/bin/python3`, which the tracked shell initializers
+already prepend to `PATH`; the distribution interpreter stays reachable under
+its own versioned name, such as `python3.10`.
+
 The Claude and Codex runtime content requires `~/compute-ai-skills`, and the
 Cursor runtime content requires `~/cursor-ai-skills`. If either is absent, the
 installer clones the expected `abchoudh-amd` repository. An existing checkout must have an

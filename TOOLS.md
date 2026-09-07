@@ -41,6 +41,12 @@ Of those packages, final validation directly requires the commands `git`,
 installer uses to validate extracted release and source-build layouts. The
 remaining packages support source builds and the configured shell environment.
 
+The distribution `python3` only satisfies that requirement when it can
+`import tomllib`, which every agent-runtime script here needs and CPython gained
+in 3.11. On an older distribution the installer links a uv-managed interpreter
+to `~/.local/bin/python3` instead, leaving the distribution interpreter
+reachable under its own versioned name.
+
 ## Language toolchains
 
 The installer bootstraps each missing toolchain before installing tools that
@@ -52,6 +58,7 @@ depend on it.
 | `go` | Latest stable Linux amd64 archive and published SHA-256 from [go.dev](https://go.dev/dl/) | `~/.local/go` |
 | `node`, `npm` | Latest tagged [NVM](https://github.com/nvm-sh/nvm) release, followed by current Node with the latest npm and a default NVM alias | `$NVM_DIR` (default `~/.nvm`); the installer enables NVM's `current` symlink |
 | `uv` | Official [uv installer](https://astral.sh/uv/install.sh) with path modification disabled | `~/.local/bin` |
+| `python3` (3.11+) | Retained when the distribution interpreter can `import tomllib`; otherwise `uv python install` provides one and the installer links it | `~/.local/bin/python3` |
 
 ## Required command inventory
 
@@ -403,7 +410,8 @@ yazi ya glow codex sqlit claude starship zoxide fzf bat rg btop duf gh gitmux
 herdr tmux nvim
 ```
 
-In addition to command presence, validation enforces tmux >= 3.2, Neovim >=
+In addition to command presence, validation enforces a `python3` that can
+`import tomllib` (CPython 3.11+), tmux >= 3.2, Neovim >=
 0.11.2, fzf >= 0.48.0, zoxide >= 0.9.0, executable release-binary and Herdr
 version probes, the Catppuccin plugin, an aligned `--check` from all three
 compute-ai-skills installers, the Claude/Codex Herdr hook links and
