@@ -103,6 +103,6 @@
   "autoCompactEnabled": true,
   "teammateMode": "in-process",
   "thinking": {
-    "type": "adaptive"
+    "type": "enabled"
   }
 }
